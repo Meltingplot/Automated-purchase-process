@@ -46,13 +46,27 @@ ERPNext / Frappe
 │                 │                                              │
 │                 ▼                                              │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Dokument-Vorverarbeitung                                 │  │
-│  │ PDF → Bild-Rendering (Prompt-Injection-Schutz)          │  │
+│  │ Dokument-Vorverarbeitung (Tiered Pipeline)              │  │
+│  │                                                          │  │
+│  │  ┌─ XRechnung/ZUGFeRD erkannt?                          │  │
+│  │  │   JA → XML extrahieren, Schema-Validierung           │  │
+│  │  │        → Deterministisches Parsing (KEIN LLM)        │  │
+│  │  │   NEIN ↓                                              │  │
+│  │  ├─ PDF mit extrahierbarem Text?                        │  │
+│  │  │   JA → PyMuPDF Sanitisierung (JS, Metadaten,        │  │
+│  │  │        Annotationen, Hidden Text entfernen)           │  │
+│  │  │        → Sanitisierten Text an LLM                   │  │
+│  │  │   NEIN ↓                                              │  │
+│  │  └─ Bild-basiertes PDF / reines Bild                    │  │
+│  │      → PDF-Seiten als Bild rendern                      │  │
+│  │      → Metadaten verwerfen                              │  │
+│  │      → Bilder an LLM (Vision)                           │  │
 │  └──────────────┬───────────────────────────────────────────┘  │
 │                 │                                              │
 │                 ▼                                              │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │ Dual-Model LLM-Extraktion (Background Job)              │  │
+│  │ (nur für Nicht-XRechnung/ZUGFeRD-Dokumente)             │  │
 │  │                                                          │  │
 │  │  ┌─────────────┐        ┌─────────────┐                 │  │
 │  │  │  Modell A    │        │  Modell B    │                │  │
@@ -95,7 +109,8 @@ ERPNext / Frappe
 | **Framework** | Frappe (Custom App) | Native ERPNext-Integration |
 | **LLM-Abstraktion** | Eigene Provider-Schicht | Cloud (Anthropic, OpenAI) + Lokal (Ollama, OpenAI-kompatibel) |
 | **Datenvalidierung** | Pydantic v2 | Strenge Schema-Validierung der LLM-Ausgabe |
-| **PDF-Verarbeitung** | PyMuPDF (fitz) | PDF→Bild, robust, schnell |
+| **PDF-Verarbeitung** | PyMuPDF (fitz) | PDF-Sanitisierung, Text-Extraktion, Bild-Rendering (Fallback) |
+| **E-Invoicing** | lxml | XRechnung/ZUGFeRD XML-Parsing & Schema-Validierung |
 | **Background Jobs** | Frappe RQ (Redis Queue) | Bereits in Frappe integriert |
 | **Persistenz** | MariaDB (via Frappe) | Frappe-Standard, Custom DocTypes |
 
@@ -108,7 +123,7 @@ ERPNext / Frappe
 Jedes Dokument wird unabhängig von **mindestens zwei verschiedenen LLM-Modellen** extrahiert. Die Ergebnisse werden automatisch verglichen.
 
 ```
-Dokument (Bild)
+Dokument (sanitisierter Text ODER Bild)
      │
      ├──────────────────────┐
      ▼                      ▼
@@ -179,8 +194,17 @@ class LLMProvider(ABC):
     """Abstrakte Basis für alle LLM-Provider."""
 
     @abstractmethod
-    def extract_document(self, images: list[bytes], prompt: str) -> dict:
-        """Extrahiert strukturierte Daten aus Dokumentbildern."""
+    def extract_document(
+        self,
+        prompt: str,
+        text: str | None = None,
+        images: list[bytes] | None = None,
+    ) -> dict:
+        """Extrahiert strukturierte Daten aus Dokumenttext oder -bildern.
+
+        Je nach Preprocessing-Ergebnis wird entweder sanitisierter Text
+        ODER gerenderte Bilder übergeben (nie beides gleichzeitig).
+        """
         ...
 
     @abstractmethod
@@ -321,7 +345,9 @@ purchase_automation/
 │   │
 │   ├── extraction/                       # Extraktions-Pipeline
 │   │   ├── __init__.py
-│   │   ├── preprocessor.py              # PDF→Bild, Sanitisierung
+│   │   ├── preprocessor.py              # Tiered Preprocessing-Router
+│   │   ├── pdf_sanitizer.py             # PyMuPDF: JS/Metadaten/Hidden-Text entfernen
+│   │   ├── einvoice_parser.py           # XRechnung/ZUGFeRD XML-Extraktion (kein LLM)
 │   │   ├── extractor.py                 # Dual-Model Extraktion
 │   │   ├── comparator.py               # Ergebnis-Vergleich
 │   │   ├── prompt_templates.py          # Prompt-Verwaltung
@@ -357,20 +383,118 @@ purchase_automation/
 
 ## 7. Prompt-Injection-Schutz (Security by Design)
 
-*(Unverändert aus v1 — siehe vorherige Version für Details)*
+### 7.1 Angriffsvektoren in PDFs
 
-### Kernprinzipien
-1. **PDF→Bild-Konvertierung** — eliminiert versteckten Text
-2. **LLM hat KEINE Handlungsfähigkeit** — kein Tool-Use, kein Function-Calling
-3. **Schema-erzwungene JSON-Ausgabe** — Pydantic-Validierung aller Felder
-4. **Deterministische Nachverarbeitung** — alle ERPNext-Aktionen in Python-Code
-5. **Dual-Model-Vergleich** — zusätzliche Sicherheitsschicht: wenn ein Modell durch Injection manipuliert wird, weicht das Ergebnis vom zweiten Modell ab → Eskalation
+| Vektor | Beschreibung | Risiko |
+|---|---|---|
+| **Versteckter Text** | Weiß-auf-weiß, Schriftgröße 0, Opacity 0 | Hoch — von LLMs gelesen, für Menschen unsichtbar |
+| **Annotationen/Kommentare** | Bösartige Anweisungen in PDF-Annotationen | Mittel |
+| **Metadaten** | Author/Subject/Keywords-Felder mit Injections | Mittel |
+| **JavaScript** | Eingebetteter ausführbarer Code | Hoch |
+| **Unicode-Obfuskation** | Zero-Width-Spaces, unsichtbare Zeichen | Mittel |
+| **Font-Encoding-Angriffe** | Fonts die Zeichen visuell anders darstellen als intern kodiert | Niedrig |
 
-### Dual-Model als Injection-Schutz
-Die Dual-Model-Architektur bietet einen natürlichen Schutz gegen Prompt-Injection:
-- Verschiedene Modelle reagieren unterschiedlich auf Injection-Versuche
-- Ein erfolgreich manipuliertes Ergebnis weicht zwangsläufig vom unmanipulierten ab
-- Abweichungen werden automatisch eskaliert
+### 7.2 Tiered Preprocessing Pipeline
+
+Statt pauschalem PDF→Bild-Rendering (teuer, Strukturverlust, OCR-Fehler) wird ein
+gestufter Ansatz verwendet, der das Dokument nach Format und Inhalt klassifiziert:
+
+```
+Eingehendes Dokument
+        │
+        ▼
+┌───────────────────────────┐
+│  Tier 0: Format-Erkennung │
+│                           │
+│  XRechnung/ZUGFeRD?  ────────▶  Deterministisches XML-Parsing
+│  (XML im PDF eingebettet  │     Schema-Validierung (Schematron)
+│   oder reines XML)        │     KEIN LLM nötig → direkt in ERPNext
+│                           │
+│  Reines Bild (PNG/JPG)?  ─────▶  Direkt an LLM Vision (kein PDF-Risiko)
+│                           │
+│  PDF mit Text?  ──────────────▶  Weiter zu Tier 1
+└───────────────────────────┘
+        │
+        ▼
+┌───────────────────────────┐
+│  Tier 1: PDF-Sanitisierung│
+│  (PyMuPDF document.scrub) │
+│                           │
+│  Entfernt:                │
+│  ├── JavaScript           │
+│  ├── Metadaten (Author,   │
+│  │   Subject, Keywords)   │
+│  ├── Annotationen &       │
+│  │   Kommentare           │
+│  ├── Hidden Text          │
+│  │   (Rendering Mode 3)   │
+│  ├── Eingebettete Dateien │
+│  └── Zero-Width Unicode   │
+│      Zeichen              │
+└─────────────┬─────────────┘
+              │
+              ▼
+┌───────────────────────────┐
+│  Tier 2: Inhalts-Analyse  │
+│                           │
+│  Ist das PDF text-basiert │
+│  (maschinenlesbar)?       │
+│                           │
+│  JA  → Sanitisierten Text │
+│        extrahieren, an    │
+│        LLM als Text       │
+│        (kostengünstig,    │
+│        strukturerhaltend) │
+│                           │
+│  NEIN → PDF ist im Kern   │
+│         ein Bild (Scan)   │
+│         → Seiten als Bild │
+│           rendern          │
+│         → Metadaten       │
+│           verwerfen       │
+│         → An LLM Vision   │
+└───────────────────────────┘
+```
+
+### 7.3 Entscheidungslogik: Text vs. Bild
+
+```python
+def classify_pdf(pdf_path: str) -> Literal["text", "image"]:
+    """
+    Heuristik: Wenn >80% der Seiten extrahierbaren Text haben
+    UND der Text >50 Zeichen pro Seite enthält → text-basiert.
+    Sonst → bild-basiert (gescanntes Dokument).
+    """
+```
+
+### 7.4 XRechnung/ZUGFeRD: LLM-Bypass
+
+Maschinenlesbare E-Rechnungsformate werden **ohne LLM** verarbeitet:
+
+- **XRechnung** (reines XML): Direktes XML-Parsing mit lxml, Validierung gegen
+  UBL/CII-Schema
+- **ZUGFeRD** (PDF + eingebettetes XML): XML-Anhang aus PDF extrahieren,
+  PDF-Anteil ignorieren, XML deterministisch parsen
+- **Vorteil**: Keine Prompt-Injection möglich, deterministisch, schnell, kostenlos
+- **Hinweis**: Ab 2025/2028 sind in Deutschland alle B2B-Rechnungen als
+  E-Rechnungen Pflicht → dieser Pfad wird zunehmend der Normalfall
+
+### 7.5 Weitere Kernprinzipien
+
+1. **LLM hat KEINE Handlungsfähigkeit** — kein Tool-Use, kein Function-Calling.
+   LLM liefert nur JSON-Daten zurück, alle Aktionen führt deterministischer
+   Python-Code aus.
+2. **Schema-erzwungene JSON-Ausgabe** — Pydantic v2 validiert jedes Feld der
+   LLM-Antwort. Unerwartete Felder werden verworfen.
+3. **Deterministische Nachverarbeitung** — alle ERPNext-Aktionen (PO/PI/PR
+   erstellen) werden ausschließlich durch Python-Code ausgeführt, niemals durch
+   LLM-generierte Befehle.
+4. **Dual-Model-Vergleich** — Zwei verschiedene Modelle extrahieren unabhängig
+   voneinander. Da verschiedene Modelle unterschiedlich auf Injection-Versuche
+   reagieren, führt ein erfolgreicher Angriff auf ein Modell zu einer Abweichung
+   → automatische Eskalation.
+5. **Ausgabe-Validierung** — Extrahierte Beträge werden gegen Autorisierungs-
+   limits geprüft, Lieferanten gegen die Stammdaten validiert.
 
 ---
 
@@ -384,7 +508,7 @@ Die Dual-Model-Architektur bietet einen natürlichen Schutz gegen Prompt-Injecti
 | 1.2 | LLM Provider Abstraktion (base.py + Anthropic + Ollama + OpenAI-kompatibel) |
 | 1.3 | Pydantic Schemas für extrahierte Daten |
 | 1.4 | Dual-Model Extraktions-Pipeline mit Vergleichslogik |
-| 1.5 | PDF→Bild Vorverarbeitung |
+| 1.5 | Tiered Preprocessing (Format-Erkennung, PDF-Sanitisierung, XRechnung/ZUGFeRD-Parser) |
 | 1.6 | Custom DocTypes (Purchase Document, Settings, Extraction Log) |
 | 1.7 | Stammdaten-Matching (Supplier + Item) |
 | 1.8 | ERPNext-Orchestrierung (PO + PI aus Eingangsrechnung) |
@@ -416,4 +540,7 @@ Bei Dual-Model-Extraktion mit ~40 Prozessen/Monat:
 - [ ] Purchase Order + Purchase Invoice werden korrekt in ERPNext erstellt
 - [ ] Beträge und MwSt. sind konsistent
 - [ ] Prompt-Injection-Tests: Manipulation durch ein Modell führt zu Eskalation
+- [ ] XRechnung/ZUGFeRD werden ohne LLM korrekt verarbeitet
+- [ ] PDF-Sanitisierung entfernt versteckten Text, JS, Metadaten nachweislich
+- [ ] Bild-basierte PDFs (Scans) werden korrekt erkannt und per Vision verarbeitet
 - [ ] Verarbeitungszeit < 60 Sekunden pro Dokument (mit 2 Modellen)
