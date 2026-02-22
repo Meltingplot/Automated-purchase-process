@@ -1,0 +1,216 @@
+{
+    "actions": [],
+    "autoname": "PA-.#####",
+    "creation": "2026-02-22 10:00:00.000000",
+    "doctype": "DocType",
+    "engine": "InnoDB",
+    "field_order": [
+        "source_file",
+        "document_type",
+        "status",
+        "retry_count",
+        "column_break_header",
+        "processing_time_seconds",
+        "comparison_score",
+        "section_break_items",
+        "items",
+        "section_break_extraction",
+        "extraction_a_result",
+        "column_break_extraction",
+        "extraction_b_result",
+        "section_break_merged",
+        "merged_result",
+        "comparison_details",
+        "section_break_links",
+        "linked_purchase_order",
+        "linked_purchase_receipt",
+        "linked_purchase_invoice",
+        "section_break_review",
+        "review_notes",
+        "error_log"
+    ],
+    "fields": [
+        {
+            "fieldname": "source_file",
+            "fieldtype": "Attach",
+            "label": "Source Document",
+            "reqd": 1
+        },
+        {
+            "fieldname": "document_type",
+            "fieldtype": "Select",
+            "label": "Document Type",
+            "options": "\nShopping Cart\nOrder Confirmation\nDelivery Note\nPurchase Invoice",
+            "description": "Auto-detected by LLM if not specified"
+        },
+        {
+            "fieldname": "status",
+            "fieldtype": "Select",
+            "label": "Status",
+            "options": "Uploaded\nProcessing\nExtracted\nReview\nApproved\nError",
+            "default": "Uploaded",
+            "in_list_view": 1,
+            "reqd": 1
+        },
+        {
+            "fieldname": "retry_count",
+            "fieldtype": "Int",
+            "label": "Retry Count",
+            "default": "0",
+            "hidden": 1
+        },
+        {
+            "fieldname": "column_break_header",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "processing_time_seconds",
+            "fieldtype": "Float",
+            "label": "Processing Time (s)",
+            "read_only": 1
+        },
+        {
+            "fieldname": "comparison_score",
+            "fieldtype": "Float",
+            "label": "Dual-Model Agreement",
+            "read_only": 1,
+            "description": "0.0 = no agreement, 1.0 = identical"
+        },
+        {
+            "fieldname": "section_break_items",
+            "fieldtype": "Section Break",
+            "label": "Extracted Items"
+        },
+        {
+            "fieldname": "items",
+            "fieldtype": "Table",
+            "label": "Items",
+            "options": "Purchase Document Item"
+        },
+        {
+            "fieldname": "section_break_extraction",
+            "fieldtype": "Section Break",
+            "label": "Raw Extraction Results",
+            "collapsible": 1
+        },
+        {
+            "fieldname": "extraction_a_result",
+            "fieldtype": "JSON",
+            "label": "Model A Result",
+            "read_only": 1
+        },
+        {
+            "fieldname": "column_break_extraction",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "extraction_b_result",
+            "fieldtype": "JSON",
+            "label": "Model B Result",
+            "read_only": 1
+        },
+        {
+            "fieldname": "section_break_merged",
+            "fieldtype": "Section Break",
+            "label": "Comparison & Merged Result",
+            "collapsible": 1
+        },
+        {
+            "fieldname": "merged_result",
+            "fieldtype": "JSON",
+            "label": "Merged Result",
+            "read_only": 1
+        },
+        {
+            "fieldname": "comparison_details",
+            "fieldtype": "JSON",
+            "label": "Comparison Details",
+            "read_only": 1
+        },
+        {
+            "fieldname": "section_break_links",
+            "fieldtype": "Section Break",
+            "label": "Linked ERPNext Documents"
+        },
+        {
+            "fieldname": "linked_purchase_order",
+            "fieldtype": "Link",
+            "label": "Purchase Order",
+            "options": "Purchase Order",
+            "read_only": 1
+        },
+        {
+            "fieldname": "linked_purchase_receipt",
+            "fieldtype": "Link",
+            "label": "Purchase Receipt",
+            "options": "Purchase Receipt",
+            "read_only": 1
+        },
+        {
+            "fieldname": "linked_purchase_invoice",
+            "fieldtype": "Link",
+            "label": "Purchase Invoice",
+            "options": "Purchase Invoice",
+            "read_only": 1
+        },
+        {
+            "fieldname": "section_break_review",
+            "fieldtype": "Section Break",
+            "label": "Review & Errors",
+            "collapsible": 1
+        },
+        {
+            "fieldname": "review_notes",
+            "fieldtype": "Small Text",
+            "label": "Review Notes"
+        },
+        {
+            "fieldname": "error_log",
+            "fieldtype": "Small Text",
+            "label": "Error Log",
+            "read_only": 1
+        }
+    ],
+    "links": [
+        {
+            "group": "Extraction",
+            "link_doctype": "LLM Extraction Log",
+            "link_fieldname": "purchase_document"
+        }
+    ],
+    "modified": "2026-02-22 10:00:00.000000",
+    "modified_by": "Administrator",
+    "module": "Purchase Automation",
+    "name": "Purchase Document",
+    "naming_rule": "Expression",
+    "owner": "Administrator",
+    "permissions": [
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "System Manager",
+            "share": 1,
+            "write": 1
+        },
+        {
+            "create": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "Purchase User",
+            "share": 1,
+            "write": 1
+        }
+    ],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "title_field": "status",
+    "track_changes": 1
+}

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "purchase_automation"
+version = "0.1.0"
+description = "Automated purchase process for ERPNext with dual-model LLM document extraction"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Meltingplot", email = "info@meltingplot.net"}
+]
+
+dependencies = [
+    "frappe",
+    "erpnext",
+    "pydantic>=2.0",
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "httpx>=0.27.0",
+    "PyMuPDF>=1.24.0",
+    "Pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0"
+erpnext = ">=15.0.0"
