@@ -1,0 +1,120 @@
+"""
+Purchase Invoice creation from extracted data.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import frappe
+from frappe.utils import today
+
+logger = logging.getLogger(__name__)
+
+
+def create_purchase_invoice(
+    extracted_data: dict,
+    supplier: str,
+    settings: dict,
+    job_name: str,
+    purchase_order: str | None = None,
+    purchase_receipt: str | None = None,
+) -> str:
+    """
+    Create a Purchase Invoice from extracted document data.
+
+    Args:
+        extracted_data: Consensus extraction data
+        supplier: Supplier document name
+        settings: Plugin settings dict
+        job_name: AI Procurement Job name
+        purchase_order: Optional linked PO name
+        purchase_receipt: Optional linked PR name
+
+    Returns:
+        Purchase Invoice name
+    """
+    items = _build_invoice_items(extracted_data, purchase_order, purchase_receipt)
+    if not items:
+        frappe.throw("Cannot create Purchase Invoice without line items")
+
+    pi = frappe.get_doc(
+        {
+            "doctype": "Purchase Invoice",
+            "supplier": supplier,
+            "company": settings.get("default_company"),
+            "posting_date": extracted_data.get("document_date") or today(),
+            "due_date": extracted_data.get("delivery_date") or today(),
+            "bill_no": extracted_data.get("document_number", ""),
+            "bill_date": extracted_data.get("document_date") or today(),
+            "ai_retrospective": 1,
+            "ai_procurement_job": job_name,
+            "items": items,
+        }
+    )
+
+    # Set payment terms if available
+    if extracted_data.get("payment_terms"):
+        pi.add_comment(
+            "Comment",
+            f"Payment terms from document: {extracted_data['payment_terms']}",
+        )
+
+    pi.insert(ignore_permissions=True)
+    pi.add_comment(
+        "Comment",
+        f"Retrospectively created from {extracted_data.get('document_type', 'unknown')} "
+        f"by AI Procurement (Job: {job_name})",
+    )
+
+    if settings.get("auto_submit_documents"):
+        pi.submit()
+
+    logger.info(f"Created Purchase Invoice: {pi.name}")
+    return pi.name
+
+
+def _build_invoice_items(
+    extracted_data: dict,
+    purchase_order: str | None,
+    purchase_receipt: str | None,
+) -> list[dict]:
+    """Build invoice items, optionally linked to PO and receipt."""
+    items = []
+
+    for item in extracted_data.get("items", []):
+        invoice_item = {
+            "item_code": item.get("item_code") or item.get("item_name", "Unknown"),
+            "item_name": item.get("item_name", "Unknown Item"),
+            "qty": float(item.get("quantity", 1)),
+            "rate": float(item.get("unit_price", 0)),
+            "uom": item.get("uom", "Nos"),
+            "expense_account": _get_default_expense_account(
+                extracted_data.get("company") or ""
+            ),
+        }
+
+        if purchase_order:
+            invoice_item["purchase_order"] = purchase_order
+        if purchase_receipt:
+            invoice_item["purchase_receipt"] = purchase_receipt
+
+        items.append(invoice_item)
+
+    return items
+
+
+def _get_default_expense_account(company: str) -> str:
+    """Get default expense account for the company."""
+    accounts = frappe.get_all(
+        "Account",
+        filters={
+            "company": company,
+            "root_type": "Expense",
+            "is_group": 0,
+        },
+        fields=["name"],
+        limit=1,
+        order_by="creation asc",
+    )
+    return accounts[0]["name"] if accounts else ""
