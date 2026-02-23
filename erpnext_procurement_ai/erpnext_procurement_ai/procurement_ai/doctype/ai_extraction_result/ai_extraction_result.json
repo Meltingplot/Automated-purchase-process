@@ -1,0 +1,86 @@
+{
+    "actions": [],
+    "creation": "2026-02-23 10:00:00.000000",
+    "doctype": "DocType",
+    "engine": "InnoDB",
+    "field_order": [
+        "llm_provider",
+        "model_version",
+        "confidence",
+        "column_break_1",
+        "processing_time_ms",
+        "token_count",
+        "agrees_with_consensus",
+        "section_break_data",
+        "extracted_data",
+        "deviation_fields"
+    ],
+    "fields": [
+        {
+            "fieldname": "llm_provider",
+            "fieldtype": "Data",
+            "in_list_view": 1,
+            "label": "LLM Provider",
+            "reqd": 1
+        },
+        {
+            "fieldname": "model_version",
+            "fieldtype": "Data",
+            "in_list_view": 1,
+            "label": "Model Version"
+        },
+        {
+            "fieldname": "confidence",
+            "fieldtype": "Float",
+            "in_list_view": 1,
+            "label": "Confidence"
+        },
+        {
+            "fieldname": "column_break_1",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "processing_time_ms",
+            "fieldtype": "Int",
+            "in_list_view": 1,
+            "label": "Processing Time (ms)"
+        },
+        {
+            "fieldname": "token_count",
+            "fieldtype": "Int",
+            "label": "Token Count"
+        },
+        {
+            "default": "0",
+            "fieldname": "agrees_with_consensus",
+            "fieldtype": "Check",
+            "label": "Agrees with Consensus"
+        },
+        {
+            "fieldname": "section_break_data",
+            "fieldtype": "Section Break",
+            "label": "Extraction Data"
+        },
+        {
+            "fieldname": "extracted_data",
+            "fieldtype": "JSON",
+            "label": "Extracted Data"
+        },
+        {
+            "fieldname": "deviation_fields",
+            "fieldtype": "JSON",
+            "label": "Deviation Fields"
+        }
+    ],
+    "istable": 1,
+    "links": [],
+    "modified": "2026-02-23 10:00:00.000000",
+    "modified_by": "Administrator",
+    "module": "Procurement AI",
+    "name": "AI Extraction Result",
+    "owner": "Administrator",
+    "permissions": [],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "states": []
+}

@@ -1,0 +1,231 @@
+{
+    "actions": [],
+    "creation": "2026-02-23 10:00:00.000000",
+    "doctype": "DocType",
+    "engine": "InnoDB",
+    "field_order": [
+        "general_section",
+        "enable_auto_processing",
+        "development_mode",
+        "default_company",
+        "column_break_general",
+        "ocr_engine",
+        "confidence_threshold",
+        "min_llm_consensus",
+        "max_parallel_llms",
+        "auto_submit_documents",
+        "escalation_email",
+        "cloud_llm_section",
+        "claude_api_key",
+        "openai_api_key",
+        "column_break_cloud",
+        "gemini_api_key",
+        "local_llm_section",
+        "enable_local_llm",
+        "local_llm_provider",
+        "local_llm_base_url",
+        "local_llm_model_name",
+        "column_break_local",
+        "local_llm_api_key",
+        "local_llm_context_length",
+        "local_llm_gpu_layers",
+        "local_llm_timeout",
+        "local_llm_trust_level"
+    ],
+    "fields": [
+        {
+            "fieldname": "general_section",
+            "fieldtype": "Section Break",
+            "label": "General Settings"
+        },
+        {
+            "default": "0",
+            "fieldname": "enable_auto_processing",
+            "fieldtype": "Check",
+            "label": "Enable Auto Processing",
+            "description": "When enabled, uploaded documents are automatically processed"
+        },
+        {
+            "default": "0",
+            "fieldname": "development_mode",
+            "fieldtype": "Check",
+            "label": "Development Mode",
+            "description": "Allows single-provider operation without consensus. For development/testing only."
+        },
+        {
+            "fieldname": "default_company",
+            "fieldtype": "Link",
+            "label": "Default Company",
+            "options": "Company",
+            "reqd": 1
+        },
+        {
+            "fieldname": "column_break_general",
+            "fieldtype": "Column Break"
+        },
+        {
+            "default": "Tesseract",
+            "fieldname": "ocr_engine",
+            "fieldtype": "Select",
+            "label": "OCR Engine",
+            "options": "Tesseract\nEasyOCR"
+        },
+        {
+            "default": "0.8",
+            "fieldname": "confidence_threshold",
+            "fieldtype": "Float",
+            "label": "Confidence Threshold",
+            "description": "Minimum confidence score for auto-approval (0.0-1.0)"
+        },
+        {
+            "default": "2",
+            "fieldname": "min_llm_consensus",
+            "fieldtype": "Int",
+            "label": "Min LLM Consensus",
+            "description": "Minimum number of LLMs that must agree (default: 2)"
+        },
+        {
+            "default": "3",
+            "fieldname": "max_parallel_llms",
+            "fieldtype": "Int",
+            "label": "Max Parallel LLMs",
+            "description": "Maximum number of parallel LLM requests"
+        },
+        {
+            "default": "0",
+            "fieldname": "auto_submit_documents",
+            "fieldtype": "Check",
+            "label": "Auto Submit Documents",
+            "description": "Automatically submit created documents (otherwise saved as Draft)"
+        },
+        {
+            "fieldname": "escalation_email",
+            "fieldtype": "Data",
+            "label": "Escalation Email",
+            "options": "Email",
+            "description": "Email address for escalation notifications"
+        },
+        {
+            "fieldname": "cloud_llm_section",
+            "fieldtype": "Section Break",
+            "label": "Cloud LLM Configuration"
+        },
+        {
+            "fieldname": "claude_api_key",
+            "fieldtype": "Password",
+            "label": "Claude API Key (Anthropic)"
+        },
+        {
+            "fieldname": "openai_api_key",
+            "fieldtype": "Password",
+            "label": "OpenAI API Key"
+        },
+        {
+            "fieldname": "column_break_cloud",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "gemini_api_key",
+            "fieldtype": "Password",
+            "label": "Gemini API Key (Google)"
+        },
+        {
+            "fieldname": "local_llm_section",
+            "fieldtype": "Section Break",
+            "label": "Local LLM Configuration",
+            "collapsible": 1
+        },
+        {
+            "default": "0",
+            "fieldname": "enable_local_llm",
+            "fieldtype": "Check",
+            "label": "Enable Local LLM"
+        },
+        {
+            "default": "Ollama",
+            "fieldname": "local_llm_provider",
+            "fieldtype": "Select",
+            "label": "Local LLM Provider",
+            "options": "Ollama\nvLLM\nllama.cpp\nLM Studio\nCustom",
+            "depends_on": "eval:doc.enable_local_llm"
+        },
+        {
+            "default": "http://localhost:11434",
+            "fieldname": "local_llm_base_url",
+            "fieldtype": "Data",
+            "label": "Local LLM Base URL",
+            "depends_on": "eval:doc.enable_local_llm"
+        },
+        {
+            "default": "llama3.1:8b",
+            "fieldname": "local_llm_model_name",
+            "fieldtype": "Data",
+            "label": "Local LLM Model Name",
+            "depends_on": "eval:doc.enable_local_llm"
+        },
+        {
+            "fieldname": "column_break_local",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "local_llm_api_key",
+            "fieldtype": "Password",
+            "label": "Local LLM API Key",
+            "description": "Optional: For authenticated local API endpoints",
+            "depends_on": "eval:doc.enable_local_llm"
+        },
+        {
+            "default": "8192",
+            "fieldname": "local_llm_context_length",
+            "fieldtype": "Int",
+            "label": "Context Length (Tokens)",
+            "depends_on": "eval:doc.enable_local_llm"
+        },
+        {
+            "default": "0",
+            "fieldname": "local_llm_gpu_layers",
+            "fieldtype": "Int",
+            "label": "GPU Layers",
+            "description": "Number of layers to offload to GPU (0 = CPU only)",
+            "depends_on": "eval:doc.enable_local_llm"
+        },
+        {
+            "default": "120",
+            "fieldname": "local_llm_timeout",
+            "fieldtype": "Int",
+            "label": "Timeout (Seconds)",
+            "depends_on": "eval:doc.enable_local_llm"
+        },
+        {
+            "default": "reduced",
+            "fieldname": "local_llm_trust_level",
+            "fieldtype": "Select",
+            "label": "Trust Level",
+            "options": "full\nreduced\nvalidation_only",
+            "description": "full: equal vote weight (70B+), reduced: half weight (13B-70B), validation_only: no vote (< 13B)",
+            "depends_on": "eval:doc.enable_local_llm"
+        }
+    ],
+    "issingle": 1,
+    "links": [],
+    "modified": "2026-02-23 10:00:00.000000",
+    "modified_by": "Administrator",
+    "module": "Procurement AI",
+    "name": "AI Procurement Settings",
+    "owner": "Administrator",
+    "permissions": [
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "print": 1,
+            "read": 1,
+            "role": "System Manager",
+            "share": 1,
+            "write": 1
+        }
+    ],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "states": []
+}

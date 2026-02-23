@@ -1,0 +1,209 @@
+{
+    "actions": [],
+    "autoname": "format:AIPROC-{####}",
+    "creation": "2026-02-23 10:00:00.000000",
+    "doctype": "DocType",
+    "engine": "InnoDB",
+    "field_order": [
+        "status",
+        "source_document",
+        "source_document_url",
+        "source_type",
+        "column_break_main",
+        "detected_type",
+        "confidence_score",
+        "section_break_ocr",
+        "raw_text_ocr",
+        "section_break_extraction",
+        "extraction_results",
+        "section_break_consensus",
+        "consensus_data",
+        "section_break_created",
+        "created_supplier",
+        "created_po",
+        "column_break_created",
+        "created_receipt",
+        "created_invoice",
+        "section_break_escalation",
+        "escalation_reason",
+        "human_review_notes"
+    ],
+    "fields": [
+        {
+            "default": "Pending",
+            "fieldname": "status",
+            "fieldtype": "Select",
+            "in_list_view": 1,
+            "in_standard_filter": 1,
+            "label": "Status",
+            "options": "Pending\nProcessing\nNeeds Review\nCompleted\nError",
+            "reqd": 1
+        },
+        {
+            "fieldname": "source_document",
+            "fieldtype": "Attach",
+            "label": "Source Document",
+            "reqd": 1
+        },
+        {
+            "fieldname": "source_document_url",
+            "fieldtype": "Data",
+            "hidden": 1,
+            "label": "Source Document URL"
+        },
+        {
+            "default": "Auto-Detect",
+            "fieldname": "source_type",
+            "fieldtype": "Select",
+            "in_list_view": 1,
+            "in_standard_filter": 1,
+            "label": "Source Type",
+            "options": "Auto-Detect\nCart\nOrder Confirmation\nDelivery Note\nInvoice"
+        },
+        {
+            "fieldname": "column_break_main",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "detected_type",
+            "fieldtype": "Select",
+            "in_list_view": 1,
+            "label": "Detected Type",
+            "options": "\nCart\nOrder Confirmation\nDelivery Note\nInvoice",
+            "read_only": 1
+        },
+        {
+            "fieldname": "confidence_score",
+            "fieldtype": "Float",
+            "in_list_view": 1,
+            "label": "Confidence Score",
+            "read_only": 1
+        },
+        {
+            "collapsible": 1,
+            "fieldname": "section_break_ocr",
+            "fieldtype": "Section Break",
+            "label": "OCR Raw Text"
+        },
+        {
+            "fieldname": "raw_text_ocr",
+            "fieldtype": "Long Text",
+            "label": "Raw OCR Text",
+            "read_only": 1
+        },
+        {
+            "collapsible": 1,
+            "fieldname": "section_break_extraction",
+            "fieldtype": "Section Break",
+            "label": "Extraction Results"
+        },
+        {
+            "fieldname": "extraction_results",
+            "fieldtype": "Table",
+            "label": "Extraction Results",
+            "options": "AI Extraction Result"
+        },
+        {
+            "collapsible": 1,
+            "fieldname": "section_break_consensus",
+            "fieldtype": "Section Break",
+            "label": "Consensus Data"
+        },
+        {
+            "fieldname": "consensus_data",
+            "fieldtype": "JSON",
+            "label": "Consensus Data",
+            "read_only": 1
+        },
+        {
+            "fieldname": "section_break_created",
+            "fieldtype": "Section Break",
+            "label": "Created Documents"
+        },
+        {
+            "fieldname": "created_supplier",
+            "fieldtype": "Link",
+            "label": "Supplier",
+            "options": "Supplier",
+            "read_only": 1
+        },
+        {
+            "fieldname": "created_po",
+            "fieldtype": "Link",
+            "label": "Purchase Order",
+            "options": "Purchase Order",
+            "read_only": 1
+        },
+        {
+            "fieldname": "column_break_created",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "created_receipt",
+            "fieldtype": "Link",
+            "label": "Purchase Receipt",
+            "options": "Purchase Receipt",
+            "read_only": 1
+        },
+        {
+            "fieldname": "created_invoice",
+            "fieldtype": "Link",
+            "label": "Purchase Invoice",
+            "options": "Purchase Invoice",
+            "read_only": 1
+        },
+        {
+            "fieldname": "section_break_escalation",
+            "fieldtype": "Section Break",
+            "label": "Escalation"
+        },
+        {
+            "fieldname": "escalation_reason",
+            "fieldtype": "Small Text",
+            "label": "Escalation Reason",
+            "read_only": 1
+        },
+        {
+            "fieldname": "human_review_notes",
+            "fieldtype": "Text",
+            "label": "Human Review Notes"
+        }
+    ],
+    "links": [],
+    "modified": "2026-02-23 10:00:00.000000",
+    "modified_by": "Administrator",
+    "module": "Procurement AI",
+    "name": "AI Procurement Job",
+    "naming_rule": "Expression",
+    "owner": "Administrator",
+    "permissions": [
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "System Manager",
+            "share": 1,
+            "write": 1
+        },
+        {
+            "create": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "Purchase User",
+            "share": 1,
+            "write": 1
+        }
+    ],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "states": [],
+    "title_field": "status",
+    "track_changes": 1
+}

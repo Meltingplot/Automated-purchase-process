@@ -1,0 +1,131 @@
+{
+    "actions": [],
+    "autoname": "format:ESC-{####}",
+    "creation": "2026-02-23 10:00:00.000000",
+    "doctype": "DocType",
+    "engine": "InnoDB",
+    "field_order": [
+        "procurement_job",
+        "escalation_type",
+        "status",
+        "column_break_1",
+        "assigned_to",
+        "resolved_at",
+        "section_break_details",
+        "reason",
+        "disputed_fields",
+        "section_break_resolution",
+        "resolution_notes",
+        "resolution_action"
+    ],
+    "fields": [
+        {
+            "fieldname": "procurement_job",
+            "fieldtype": "Link",
+            "in_list_view": 1,
+            "label": "Procurement Job",
+            "options": "AI Procurement Job",
+            "reqd": 1
+        },
+        {
+            "default": "Low Confidence",
+            "fieldname": "escalation_type",
+            "fieldtype": "Select",
+            "in_list_view": 1,
+            "label": "Escalation Type",
+            "options": "Low Confidence\nField Dispute\nAmount Mismatch\nSupplier Unclear\nOCR Mismatch\nProcessing Error"
+        },
+        {
+            "default": "Open",
+            "fieldname": "status",
+            "fieldtype": "Select",
+            "in_list_view": 1,
+            "in_standard_filter": 1,
+            "label": "Status",
+            "options": "Open\nIn Review\nResolved\nDismissed"
+        },
+        {
+            "fieldname": "column_break_1",
+            "fieldtype": "Column Break"
+        },
+        {
+            "fieldname": "assigned_to",
+            "fieldtype": "Link",
+            "label": "Assigned To",
+            "options": "User"
+        },
+        {
+            "fieldname": "resolved_at",
+            "fieldtype": "Datetime",
+            "label": "Resolved At",
+            "read_only": 1
+        },
+        {
+            "fieldname": "section_break_details",
+            "fieldtype": "Section Break",
+            "label": "Details"
+        },
+        {
+            "fieldname": "reason",
+            "fieldtype": "Small Text",
+            "label": "Reason",
+            "reqd": 1
+        },
+        {
+            "fieldname": "disputed_fields",
+            "fieldtype": "JSON",
+            "label": "Disputed Fields"
+        },
+        {
+            "fieldname": "section_break_resolution",
+            "fieldtype": "Section Break",
+            "label": "Resolution"
+        },
+        {
+            "fieldname": "resolution_notes",
+            "fieldtype": "Text",
+            "label": "Resolution Notes"
+        },
+        {
+            "fieldname": "resolution_action",
+            "fieldtype": "Select",
+            "label": "Resolution Action",
+            "options": "\nApproved as-is\nManually Corrected\nRejected\nReprocessed"
+        }
+    ],
+    "links": [],
+    "modified": "2026-02-23 10:00:00.000000",
+    "modified_by": "Administrator",
+    "module": "Procurement AI",
+    "name": "AI Escalation Log",
+    "naming_rule": "Expression",
+    "owner": "Administrator",
+    "permissions": [
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "System Manager",
+            "share": 1,
+            "write": 1
+        },
+        {
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "Purchase User",
+            "share": 1,
+            "write": 1
+        }
+    ],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "states": [],
+    "track_changes": 1
+}
