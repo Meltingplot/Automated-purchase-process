@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include erpnext_procurement_ai *.css
+recursive-include erpnext_procurement_ai *.csv
+recursive-include erpnext_procurement_ai *.html
+recursive-include erpnext_procurement_ai *.ico
+recursive-include erpnext_procurement_ai *.js
+recursive-include erpnext_procurement_ai *.json
+recursive-include erpnext_procurement_ai *.md
+recursive-include erpnext_procurement_ai *.png
+recursive-include erpnext_procurement_ai *.py
+recursive-include erpnext_procurement_ai *.svg
+recursive-include erpnext_procurement_ai *.txt
+recursive-exclude erpnext_procurement_ai *.pyc
