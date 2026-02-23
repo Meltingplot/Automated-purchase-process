@@ -1,0 +1,17 @@
+.procurement-ai-dashboard {
+    padding: 15px;
+}
+
+.procurement-ai-dashboard .stat-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: box-shadow 0.2s ease;
+}
+
+.procurement-ai-dashboard .escalation-card:hover {
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    transition: box-shadow 0.2s ease;
+}
+
+.procurement-ai-dashboard .list-row:hover {
+    background: var(--subtle-fg);
+}
