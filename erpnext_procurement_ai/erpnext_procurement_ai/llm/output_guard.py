@@ -89,6 +89,11 @@ class OutputGuard:
         if code_block_match:
             return code_block_match.group(1).strip()
 
+        # Check if the outermost structure is a JSON array — reject it
+        stripped = text.strip()
+        if stripped.startswith("["):
+            return None
+
         # Try to find raw JSON object
         brace_match = re.search(r"\{.*\}", text, re.DOTALL)
         if brace_match:
