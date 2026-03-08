@@ -320,7 +320,10 @@ def _save_extraction_results(job, pipeline_result: dict):
             {
                 "llm_provider": result.get("provider", "unknown"),
                 "model_version": result.get("model_version", ""),
-                "extracted_data": json.dumps(result.get("extracted_data") or {}),
+                "extracted_data": json.dumps(
+                    result.get("extracted_data")
+                    or {"errors": result.get("errors", [])}
+                ),
                 "confidence": result.get("confidence", 0.0),
                 "processing_time_ms": result.get("processing_time_ms", 0),
                 "token_count": result.get("token_count", 0),

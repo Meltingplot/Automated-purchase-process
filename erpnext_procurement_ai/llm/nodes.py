@@ -266,11 +266,21 @@ def build_consensus_node(state: dict) -> dict:
     ]
 
     if not valid_results:
+        # Collect actual error messages from failed results
+        error_details = []
+        for r in llm_results:
+            provider = r.get("provider", "unknown")
+            errors = r.get("errors", [])
+            if errors:
+                error_details.append(f"{provider}: {'; '.join(errors)}")
+        reason = "No valid extraction results from any LLM"
+        if error_details:
+            reason += "\n" + "\n".join(error_details)
         return {
             "consensus": None,
             "confidence": 0.0,
             "needs_escalation": True,
-            "escalation_reasons": ["No valid extraction results from any LLM"],
+            "escalation_reasons": [reason],
         }
 
     # Development mode: single result = auto-accept
