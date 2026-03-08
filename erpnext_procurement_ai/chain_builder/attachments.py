@@ -20,14 +20,15 @@ import frappe
 logger = logging.getLogger(__name__)
 
 # Source type → (primary target DocType, secondary target DocTypes)
+# Keys match the DocType Select field options
 ATTACHMENT_TARGETS: dict[str, dict] = {
-    "cart": {"primary": "Purchase Order", "secondary": []},
-    "order_confirmation": {"primary": "Purchase Order", "secondary": []},
-    "delivery_note": {
+    "Cart": {"primary": "Purchase Order", "secondary": []},
+    "Order Confirmation": {"primary": "Purchase Order", "secondary": []},
+    "Delivery Note": {
         "primary": "Purchase Receipt",
         "secondary": ["Purchase Order"],
     },
-    "invoice": {
+    "Invoice": {
         "primary": "Purchase Invoice",
         "secondary": ["Purchase Order", "Purchase Receipt"],
     },

@@ -95,25 +95,27 @@ def classify_document_node(state: dict) -> dict:
     settings = state.get("settings", {})
     source_type_hint = state.get("source_type_hint")
 
+    # Map LLM lowercase output → DocType Select values
+    llm_to_frappe = {
+        "cart": "Cart",
+        "order_confirmation": "Order Confirmation",
+        "delivery_note": "Delivery Note",
+        "invoice": "Invoice",
+    }
+
     # If user already specified a type, use it
     if source_type_hint and source_type_hint != "Auto-Detect":
-        type_map = {
-            "Cart": "cart",
-            "Order Confirmation": "order_confirmation",
-            "Delivery Note": "delivery_note",
-            "Invoice": "invoice",
-        }
-        return {"source_type_hint": type_map.get(source_type_hint, source_type_hint)}
+        return {"source_type_hint": source_type_hint}
 
     # Auto-detect using first available LLM
     active_providers = LLMProviderFactory.get_active_providers(settings)
     if not active_providers:
-        return {"source_type_hint": "invoice"}  # Default fallback
+        return {"source_type_hint": "Invoice"}  # Default fallback
 
     provider = active_providers[0]
     llm = LLMProviderFactory.create(provider, settings)
     if not llm:
-        return {"source_type_hint": "invoice"}
+        return {"source_type_hint": "Invoice"}
 
     try:
         messages = build_classification_messages(state.get("raw_text", ""))
@@ -125,6 +127,7 @@ def classify_document_node(state: dict) -> dict:
         response = llm.invoke(langchain_messages)
         result = json.loads(response.content)
         detected_type = result.get("document_type", "invoice")
+        detected_type = llm_to_frappe.get(detected_type, detected_type)
 
         logger.info(
             f"Job {state.get('job_name')}: Document classified as "
@@ -135,7 +138,7 @@ def classify_document_node(state: dict) -> dict:
 
     except Exception as e:
         logger.warning(f"Document classification failed: {e}")
-        return {"source_type_hint": "invoice"}
+        return {"source_type_hint": "Invoice"}
 
 
 def llm_extraction_node_factory(provider: str) -> Callable:

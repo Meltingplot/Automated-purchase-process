@@ -22,11 +22,12 @@ from .supplier import ensure_supplier
 logger = logging.getLogger(__name__)
 
 # Mapping: source type → which documents need to be created
+# Keys match the DocType Select field options
 NEEDED_DOCS: dict[str, list[str]] = {
-    "cart": ["Purchase Order"],
-    "order_confirmation": ["Purchase Order"],
-    "delivery_note": ["Purchase Order", "Purchase Receipt"],
-    "invoice": ["Purchase Order", "Purchase Receipt", "Purchase Invoice"],
+    "Cart": ["Purchase Order"],
+    "Order Confirmation": ["Purchase Order"],
+    "Delivery Note": ["Purchase Order", "Purchase Receipt"],
+    "Invoice": ["Purchase Order", "Purchase Receipt", "Purchase Invoice"],
 }
 
 

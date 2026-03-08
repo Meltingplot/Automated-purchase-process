@@ -129,21 +129,10 @@ def run_extraction_pipeline(procurement_job_name: str):
 
         graph = build_extraction_graph(settings)
 
-        # Map source_type display value to internal key
-        source_type_map = {
-            "Auto-Detect": "Auto-Detect",
-            "Cart": "Cart",
-            "Order Confirmation": "Order Confirmation",
-            "Delivery Note": "Delivery Note",
-            "Invoice": "Invoice",
-        }
-
         initial_state = {
             "raw_text": raw_text,
             "document_images": images,
-            "source_type_hint": source_type_map.get(
-                job.source_type, job.source_type
-            ),
+            "source_type_hint": job.source_type or "Auto-Detect",
             "source_file_url": job.source_document_url or job.source_document,
             "job_name": job_name,
             "ocr_result": None,
@@ -194,7 +183,7 @@ def run_extraction_pipeline(procurement_job_name: str):
 
         # Step 5: Build document chain
         consensus_data = result.get("validated_data") or result.get("consensus") or {}
-        source_type = result.get("source_type_hint", "invoice")
+        source_type = result.get("source_type_hint", "Invoice")
         source_file_url = job.source_document_url or job.source_document
 
         from ...chain_builder.retrospective import RetrospectiveChainBuilder
