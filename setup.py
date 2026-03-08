@@ -9,5 +9,5 @@ setup(
     packages=find_packages(),
     zip_safe=False,
     include_package_data=True,
-    install_requires=[],  # dependencies managed via requirements.txt
+    install_requires=[],  # dependencies declared in pyproject.toml
 )
