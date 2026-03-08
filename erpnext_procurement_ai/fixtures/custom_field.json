@@ -1,9 +1,9 @@
 [
   {
     "name": "Purchase Order-ai_retrospective",
-    "dt": "Custom Field",
-    "module": "Procurement AI",
     "doctype": "Custom Field",
+    "dt": "Purchase Order",
+    "module": "Procurement AI",
     "fieldname": "ai_retrospective",
     "fieldtype": "Check",
     "label": "AI Retrospective",
@@ -11,14 +11,13 @@
     "read_only": 1,
     "no_copy": 1,
     "hidden": 1,
-    "print_hide": 1,
-    "doc_type": "Purchase Order"
+    "print_hide": 1
   },
   {
     "name": "Purchase Order-ai_procurement_job",
-    "dt": "Custom Field",
-    "module": "Procurement AI",
     "doctype": "Custom Field",
+    "dt": "Purchase Order",
+    "module": "Procurement AI",
     "fieldname": "ai_procurement_job",
     "fieldtype": "Link",
     "label": "AI Procurement Job",
@@ -27,14 +26,13 @@
     "read_only": 1,
     "no_copy": 1,
     "hidden": 1,
-    "print_hide": 1,
-    "doc_type": "Purchase Order"
+    "print_hide": 1
   },
   {
     "name": "Purchase Receipt-ai_retrospective",
-    "dt": "Custom Field",
-    "module": "Procurement AI",
     "doctype": "Custom Field",
+    "dt": "Purchase Receipt",
+    "module": "Procurement AI",
     "fieldname": "ai_retrospective",
     "fieldtype": "Check",
     "label": "AI Retrospective",
@@ -42,14 +40,13 @@
     "read_only": 1,
     "no_copy": 1,
     "hidden": 1,
-    "print_hide": 1,
-    "doc_type": "Purchase Receipt"
+    "print_hide": 1
   },
   {
     "name": "Purchase Receipt-ai_procurement_job",
-    "dt": "Custom Field",
-    "module": "Procurement AI",
     "doctype": "Custom Field",
+    "dt": "Purchase Receipt",
+    "module": "Procurement AI",
     "fieldname": "ai_procurement_job",
     "fieldtype": "Link",
     "label": "AI Procurement Job",
@@ -58,14 +55,13 @@
     "read_only": 1,
     "no_copy": 1,
     "hidden": 1,
-    "print_hide": 1,
-    "doc_type": "Purchase Receipt"
+    "print_hide": 1
   },
   {
     "name": "Purchase Invoice-ai_retrospective",
-    "dt": "Custom Field",
-    "module": "Procurement AI",
     "doctype": "Custom Field",
+    "dt": "Purchase Invoice",
+    "module": "Procurement AI",
     "fieldname": "ai_retrospective",
     "fieldtype": "Check",
     "label": "AI Retrospective",
@@ -73,14 +69,13 @@
     "read_only": 1,
     "no_copy": 1,
     "hidden": 1,
-    "print_hide": 1,
-    "doc_type": "Purchase Invoice"
+    "print_hide": 1
   },
   {
     "name": "Purchase Invoice-ai_procurement_job",
-    "dt": "Custom Field",
-    "module": "Procurement AI",
     "doctype": "Custom Field",
+    "dt": "Purchase Invoice",
+    "module": "Procurement AI",
     "fieldname": "ai_procurement_job",
     "fieldtype": "Link",
     "label": "AI Procurement Job",
@@ -89,7 +84,6 @@
     "read_only": 1,
     "no_copy": 1,
     "hidden": 1,
-    "print_hide": 1,
-    "doc_type": "Purchase Invoice"
+    "print_hide": 1
   }
 ]
