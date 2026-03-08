@@ -29,6 +29,12 @@ def process(source_type: str = "Auto-Detect"):
     Expects a file upload in the request. Creates an AI Procurement Job
     and enqueues background processing.
     """
+    if not frappe.has_permission("AI Procurement Job", ptype="create"):
+        frappe.throw(
+            "You do not have permission to create AI Procurement Jobs",
+            frappe.PermissionError,
+        )
+
     # Get uploaded file
     uploaded_file = frappe.request.files.get("file")
     if not uploaded_file:

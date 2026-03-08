@@ -34,7 +34,7 @@ def create_purchase_invoice(
     Returns:
         Purchase Invoice name
     """
-    items = _build_invoice_items(extracted_data, purchase_order, purchase_receipt)
+    items = _build_invoice_items(extracted_data, settings, purchase_order, purchase_receipt)
     if not items:
         frappe.throw("Cannot create Purchase Invoice without line items")
 
@@ -76,10 +76,12 @@ def create_purchase_invoice(
 
 def _build_invoice_items(
     extracted_data: dict,
+    settings: dict,
     purchase_order: str | None,
     purchase_receipt: str | None,
 ) -> list[dict]:
     """Build invoice items, optionally linked to PO and receipt."""
+    company = settings.get("default_company")
     items = []
 
     for item in extracted_data.get("items", []):
@@ -89,9 +91,7 @@ def _build_invoice_items(
             "qty": float(item.get("quantity", 1)),
             "rate": float(item.get("unit_price", 0)),
             "uom": item.get("uom", "Nos"),
-            "expense_account": _get_default_expense_account(
-                extracted_data.get("company") or ""
-            ),
+            "expense_account": _get_default_expense_account(company),
         }
 
         if purchase_order:
@@ -106,15 +106,28 @@ def _build_invoice_items(
 
 def _get_default_expense_account(company: str) -> str:
     """Get default expense account for the company."""
+    # Try company default first
+    if company:
+        default = frappe.db.get_value("Company", company, "default_expense_account")
+        if default:
+            return default
+
+    # Fall back to first non-group expense account for the company
+    filters = {"root_type": "Expense", "is_group": 0}
+    if company:
+        filters["company"] = company
+
     accounts = frappe.get_all(
         "Account",
-        filters={
-            "company": company,
-            "root_type": "Expense",
-            "is_group": 0,
-        },
+        filters=filters,
         fields=["name"],
         limit=1,
         order_by="creation asc",
     )
-    return accounts[0]["name"] if accounts else ""
+    if accounts:
+        return accounts[0]["name"]
+
+    frappe.throw(
+        f"No expense account found for company {company!r}. "
+        "Please set a default expense account in Company settings."
+    )

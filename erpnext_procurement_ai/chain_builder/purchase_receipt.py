@@ -32,7 +32,7 @@ def create_purchase_receipt(
     Returns:
         Purchase Receipt name
     """
-    items = _build_receipt_items(extracted_data, purchase_order)
+    items = _build_receipt_items(extracted_data, settings, purchase_order)
     if not items:
         frappe.throw("Cannot create Purchase Receipt without line items")
 
@@ -63,9 +63,10 @@ def create_purchase_receipt(
 
 
 def _build_receipt_items(
-    extracted_data: dict, purchase_order: str | None
+    extracted_data: dict, settings: dict, purchase_order: str | None
 ) -> list[dict]:
     """Build receipt items, optionally linked to a PO."""
+    company = settings.get("default_company")
     items = []
 
     for item in extracted_data.get("items", []):
@@ -75,7 +76,7 @@ def _build_receipt_items(
             "qty": float(item.get("quantity", 1)),
             "rate": float(item.get("unit_price", 0)),
             "uom": item.get("uom", "Nos"),
-            "warehouse": _get_default_warehouse(),
+            "warehouse": _get_default_warehouse(company),
         }
 
         if purchase_order:
@@ -86,13 +87,30 @@ def _build_receipt_items(
     return items
 
 
-def _get_default_warehouse() -> str:
+def _get_default_warehouse(company: str) -> str:
     """Get the default warehouse for receiving goods."""
+    # Try company default first
+    if company:
+        default = frappe.db.get_value("Company", company, "default_warehouse")
+        if default:
+            return default
+
+    # Fall back to first non-group warehouse for the company
+    filters = {"is_group": 0}
+    if company:
+        filters["company"] = company
+
     warehouses = frappe.get_all(
         "Warehouse",
-        filters={"is_group": 0},
+        filters=filters,
         fields=["name"],
         limit=1,
         order_by="creation asc",
     )
-    return warehouses[0]["name"] if warehouses else "Stores - "
+    if warehouses:
+        return warehouses[0]["name"]
+
+    frappe.throw(
+        f"No warehouse found for company {company!r}. "
+        "Please set a default warehouse in Company settings."
+    )

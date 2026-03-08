@@ -37,6 +37,12 @@ def get_dashboard_stats() -> dict:
 
     Returns counts by status, recent jobs, and escalation queue.
     """
+    if not frappe.has_permission("AI Procurement Job", ptype="read"):
+        frappe.throw(
+            "You do not have permission to view AI Procurement Jobs",
+            frappe.PermissionError,
+        )
+
     # Status counts
     status_counts = {}
     for status in ["Pending", "Processing", "Needs Review", "Completed", "Error"]:

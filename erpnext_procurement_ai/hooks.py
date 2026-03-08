@@ -19,6 +19,7 @@ scheduler_events = {
 # DocType JS Customizations
 doctype_js = {
     "Purchase Order": "public/js/purchase_order_custom.js",
+    "Purchase Receipt": "public/js/purchase_receipt_custom.js",
     "Purchase Invoice": "public/js/purchase_invoice_custom.js",
 }
 
