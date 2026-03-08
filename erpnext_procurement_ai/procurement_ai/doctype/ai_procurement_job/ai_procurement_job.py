@@ -20,7 +20,7 @@ class AIProcurementJob(Document):
             "erpnext_procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
             queue="long",
             timeout=600,
-            job_name=self.name,
+            procurement_job_name=self.name,
         )
 
         frappe.msgprint(f"Processing started for {self.name}", alert=True)

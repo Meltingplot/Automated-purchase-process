@@ -83,7 +83,7 @@ def process(source_type: str = "Auto-Detect"):
             "erpnext_procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
             queue="long",
             timeout=600,
-            job_name=job.name,
+            procurement_job_name=job.name,
         )
 
     frappe.response["message"] = {
@@ -93,12 +93,13 @@ def process(source_type: str = "Auto-Detect"):
     }
 
 
-def run_extraction_pipeline(job_name: str):
+def run_extraction_pipeline(procurement_job_name: str):
     """
     Background job: Run the full extraction pipeline for a job.
 
     This is enqueued via frappe.enqueue() and runs asynchronously.
     """
+    job_name = procurement_job_name
     try:
         job = frappe.get_doc("AI Procurement Job", job_name)
         job.status = "Processing"
@@ -271,7 +272,7 @@ def process_pending_jobs():
             "erpnext_procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
             queue="long",
             timeout=600,
-            job_name=job_data["name"],
+            procurement_job_name=job_data["name"],
         )
 
 
