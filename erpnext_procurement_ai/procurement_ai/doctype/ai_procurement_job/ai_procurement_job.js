@@ -50,6 +50,9 @@ frappe.ui.form.on("AI Procurement Job", {
             var has_created_docs = frm.doc.created_po || frm.doc.created_receipt || frm.doc.created_invoice;
 
             if (has_created_docs) {
+                // Show review summary and mismatch reason
+                _render_needs_review_summary(frm);
+
                 // Post-creation verification — user checks amounts match
                 frm.add_custom_button(
                     __("Mark as Completed"),
@@ -425,6 +428,85 @@ function _render_match_badges(wrapper, matches) {
             $row.after($conversion_row);
         }
     });
+}
+
+// =================================================================
+// Needs Review summary (post-creation amount mismatch)
+// =================================================================
+
+function _render_needs_review_summary(frm) {
+    var consensus = {};
+    try {
+        consensus = JSON.parse(frm.doc.reviewed_data || frm.doc.consensus_data || "{}");
+    } catch (e) {
+        consensus = {};
+    }
+
+    var html = '<div class="needs-review-summary" style="padding:10px;">';
+
+    // Reason banner
+    if (frm.doc.escalation_reason) {
+        html +=
+            '<div style="margin-bottom:16px;padding:12px 16px;border-radius:6px;' +
+            'background:#fff3cd;border:1px solid #ffc107;">' +
+            '<strong style="color:#856404;">' + __("Review Required") + '</strong>' +
+            '<pre style="margin:8px 0 0;white-space:pre-wrap;color:#856404;font-size:0.9em;">' +
+            frappe.utils.escape_html(frm.doc.escalation_reason) + '</pre></div>';
+    }
+
+    // Read-only header fields
+    html += '<h5 style="margin-bottom:12px;">' + __("Extracted Data") + '</h5>';
+    html += '<table class="table table-bordered table-sm">';
+    html += '<thead><tr><th>' + __("Field") + '</th><th>' + __("Value") + '</th></tr></thead><tbody>';
+
+    _HEADER_FIELDS.forEach(function (f) {
+        var val = consensus[f.key];
+        if (val === null || val === undefined || val === "") return;
+        var display_val = frappe.utils.escape_html(String(val));
+        if (f.type === "number" && val) {
+            display_val = format_currency(parseFloat(val));
+        }
+        html += '<tr><td><strong>' + __(f.label) + '</strong></td>';
+        html += '<td>' + display_val + '</td></tr>';
+    });
+    html += '</tbody></table>';
+
+    // Read-only items table
+    var items = consensus.items || [];
+    if (items.length > 0) {
+        html += '<h5 style="margin-top:16px;margin-bottom:12px;">' + __("Line Items") + '</h5>';
+        html += '<div style="overflow-x:auto;">';
+        html += '<table class="table table-bordered table-sm">';
+        html += '<thead><tr><th>#</th>';
+        _ITEM_FIELDS.forEach(function (f) {
+            html += '<th>' + __(f.label) + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+
+        items.forEach(function (item, idx) {
+            html += '<tr>';
+            html += '<td>' + (idx + 1) + '</td>';
+            _ITEM_FIELDS.forEach(function (f) {
+                var val = item[f.key];
+                if (val === null || val === undefined) val = "";
+                var display_val = frappe.utils.escape_html(String(val));
+                if ((f.key === "unit_price") && val) {
+                    display_val = format_currency(parseFloat(val));
+                }
+                html += '<td>' + display_val + '</td>';
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+    }
+
+    html += '</div>';
+
+    // Render into review_html wrapper
+    var wrapper = frm.fields_dict.review_html;
+    if (wrapper && wrapper.$wrapper) {
+        wrapper.$wrapper.html(html);
+    }
 }
 
 function _compute_confidence(frm) {

@@ -123,7 +123,7 @@
             "fieldname": "section_break_review",
             "fieldtype": "Section Break",
             "label": "Document Review",
-            "depends_on": "eval:doc.status=='Awaiting Review'"
+            "depends_on": "eval:doc.status=='Awaiting Review' || doc.status=='Needs Review'"
         },
         {
             "fieldname": "review_html",

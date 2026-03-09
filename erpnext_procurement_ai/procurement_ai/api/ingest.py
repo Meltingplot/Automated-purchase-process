@@ -275,6 +275,7 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
 
     if has_mismatch:
         job.status = "Needs Review"
+        job.escalation_reason = verification
         stage = "needs_review"
     else:
         job.status = "Completed"
@@ -564,15 +565,21 @@ def _verify_amounts(
     except (TypeError, ValueError):
         return False, None
 
+    # PR has no taxes → compare against subtotal; PO/PI have taxes → compare against total
+    extracted_subtotal = consensus_data.get("subtotal")
+    try:
+        extracted_subtotal = float(extracted_subtotal) if extracted_subtotal else None
+    except (TypeError, ValueError):
+        extracted_subtotal = None
+
     lines = []
     lines.append(f"**Amount Verification** (extracted total: {extracted_total:.2f}, tolerance: {tolerance:.2f})")
 
     has_mismatch = False
 
-    # Check each created document type
+    # Check PO and PI against grand_total (includes taxes)
     for doctype, key in [
         ("Purchase Order", "purchase_order"),
-        ("Purchase Receipt", "purchase_receipt"),
         ("Purchase Invoice", "purchase_invoice"),
     ]:
         doc_name = created.get(key)
@@ -595,6 +602,24 @@ def _verify_amounts(
                 f"- {doctype} {doc_name}: {grand_total:.2f} "
                 f"(diff: {diff:.2f}, {pct:.1f}%) ⚠"
             )
+
+    # Check PR against total (net, no taxes on receipts)
+    pr_name = created.get("purchase_receipt")
+    if pr_name and extracted_subtotal:
+        pr_total = frappe.db.get_value("Purchase Receipt", pr_name, "total")
+        if pr_total is not None:
+            pr_total = float(pr_total)
+            diff = abs(pr_total - extracted_subtotal)
+            pct = (diff / extracted_subtotal * 100) if extracted_subtotal else 0
+
+            if diff <= tolerance:
+                lines.append(f"- Purchase Receipt {pr_name}: {pr_total:.2f} (net) ✓")
+            else:
+                has_mismatch = True
+                lines.append(
+                    f"- Purchase Receipt {pr_name}: {pr_total:.2f} vs subtotal {extracted_subtotal:.2f} "
+                    f"(diff: {diff:.2f}, {pct:.1f}%) ⚠"
+                )
 
     if len(lines) <= 1:
         return False, None
