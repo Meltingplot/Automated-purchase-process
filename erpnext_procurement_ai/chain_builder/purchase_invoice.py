@@ -128,9 +128,11 @@ def _build_invoice_items(
     )
 
     for idx, item in enumerate(extracted_data.get("items", [])):
+        # Use item_code from linked PO/PR item when available — must match for ERPNext validation
+        po_linked_code = po_item_links[idx]["item_code"] if po_item_links and idx in po_item_links else None
+        pr_linked_code = pr_item_links[idx]["item_code"] if pr_item_links and idx in pr_item_links else None
         mapped_code = item_mapping.get(idx) if item_mapping else None
-        stock_uom = stock_uom_mapping.get(idx) if stock_uom_mapping else None
-        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
+        item_code = po_linked_code or pr_linked_code or mapped_code or _resolve_item(item, settings, supplier, stock_uom=(stock_uom_mapping.get(idx) if stock_uom_mapping else None))
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
         uom_raw = item.get("uom") or ""
