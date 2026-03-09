@@ -420,31 +420,24 @@ function _render_match_badges(wrapper, matches) {
             }
         }
 
+        // Pre-fill the Link control and show status badge
+        var $link = wrapper.find('.item-link-control[data-idx="' + idx + '"]');
+        var link_control = $link.data("control");
         if (info.exists) {
+            if (link_control) {
+                link_control.set_value(info.item_code);
+            }
             $cell.html(
-                '<a href="/app/item/' +
-                    encodeURIComponent(info.item_code) +
-                    '" style="font-size:0.85em;">' +
-                    frappe.utils.escape_html(info.item_code) +
-                    "</a> " +
-                    '<span class="badge badge-success" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
                     __("Exists") + "</span>"
             );
-            // Pre-fill the Link control with the matched item
-            var $link = wrapper.find('.item-link-control[data-idx="' + idx + '"]');
-            var control = $link.data("control");
-            if (control) {
-                control.set_value(info.item_code);
-            }
-            // Set stock UOM from existing item and disable it
             if (info.stock_uom) {
                 _set_stock_uom_readonly(wrapper, idx, info.stock_uom);
             }
         } else {
             $cell.html(
-                '<span class="badge badge-info" style="background:#3182ce;color:#fff;font-size:0.75em;">' +
-                    __("New") +
-                    "</span>"
+                '<span class="badge" style="background:#3182ce;color:#fff;font-size:0.75em;">' +
+                    __("New") + "</span>"
             );
         }
 
