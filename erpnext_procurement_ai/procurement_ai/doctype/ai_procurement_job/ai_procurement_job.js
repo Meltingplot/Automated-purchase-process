@@ -79,11 +79,8 @@ frappe.ui.form.on("AI Procurement Job", {
                                 "This will create the procurement documents from the extracted data. Continue?"
                             ),
                             function () {
-                                frm.call({
-                                    method: "process_document",
-                                    callback: function () {
-                                        frm.reload_doc();
-                                    },
+                                frm.call("process_document").then(function () {
+                                    frm.reload_doc();
                                 });
                             }
                         );

@@ -552,12 +552,46 @@ def _ensure_uom_conversion_factor(from_uom: str, to_uom: str, value: float):
 
     doc = frappe.get_doc({
         "doctype": "UOM Conversion Factor",
+        "category": _get_uom_category(),
         "from_uom": from_uom,
         "to_uom": to_uom,
         "value": value,
     })
     doc.insert(ignore_permissions=True)
     logger.info(f"Created UOM Conversion Factor: 1 {from_uom} = {value} {to_uom}")
+
+
+# Cache for the resolved UOM category name
+_uom_category_cache: str | None = None
+
+
+def _get_uom_category() -> str:
+    """Return a UOM Category for bulk piece-count conversions.
+
+    Looks up the first existing UOM Category, falling back to creating
+    a 'Unit' category if none exist.
+    """
+    global _uom_category_cache
+    if _uom_category_cache is not None:
+        return _uom_category_cache
+
+    # Prefer 'Anzahl' if it exists
+    if frappe.db.exists("UOM Category", "Anzahl"):
+        _uom_category_cache = "Anzahl"
+        return "Anzahl"
+
+    # Fall back to first available category
+    categories = frappe.get_all("UOM Category", fields=["name"], limit=1)
+    if categories:
+        _uom_category_cache = categories[0]["name"]
+        return _uom_category_cache
+
+    # None exist — create 'Anzahl'
+    frappe.get_doc({"doctype": "UOM Category", "category_name": "Anzahl"}).insert(
+        ignore_permissions=True
+    )
+    _uom_category_cache = "Anzahl"
+    return "Anzahl"
 
 
 def _ensure_item_uom(item_code: str, uom: str, conversion_factor: float):

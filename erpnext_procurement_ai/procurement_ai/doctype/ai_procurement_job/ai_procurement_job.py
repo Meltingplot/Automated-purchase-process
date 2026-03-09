@@ -26,7 +26,7 @@ class AIProcurementJob(Document):
     @frappe.whitelist()
     def process_document(self):
         """Trigger document processing via background job."""
-        if self.status not in ("Pending", "Error"):
+        if self.status not in ("Pending", "Error", "Needs Review"):
             frappe.throw(f"Cannot process job in status '{self.status}'")
 
         self.status = "Processing"
