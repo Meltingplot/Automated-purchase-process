@@ -255,6 +255,19 @@ def _resolve_uom(uom: str) -> str:
     return "Nos"
 
 
+def _is_numeric_uom(uom_name: str) -> bool:
+    """Check if a UOM name is purely numeric (e.g. '10', '100', '1000').
+
+    Only numeric UOM names represent "per-N-pieces" packaging.
+    Named UOMs like 'Box', 'Tray', 'Pallet' have item-specific
+    meanings and must not be auto-applied.
+    """
+    try:
+        return float(uom_name) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 # Minimum rate threshold — prices below this trigger bulk UOM lookup.
 # 0.01 = 1 cent. Anything below is likely priced per-100 or per-1000.
 _MIN_RATE_THRESHOLD = 0.01
@@ -281,6 +294,8 @@ def _adjust_bulk_uom(
     conversion is registered on the item so ERPNext accepts it on transactions.
 
     Only applies to piece-type UOMs (Nos) where bulk packaging makes sense.
+    Only considers numeric UOM names (10, 25, 50, 100, 1000, ...) — named
+    UOMs like 'Box' or 'Tray' are skipped as they have item-specific meanings.
     """
     if rate >= _MIN_RATE_THRESHOLD or rate <= 0 or qty <= 0:
         return qty, rate, uom
@@ -289,7 +304,7 @@ def _adjust_bulk_uom(
     if uom not in ("Nos", "Stk", "Stück", "pcs"):
         return qty, rate, uom
 
-    # Step 1: Check item-specific UOM conversions
+    # Step 1: Check item-specific UOM conversions (only numeric UOM names)
     if item_code and frappe.db.exists("Item", item_code):
         item_uoms = frappe.get_all(
             "UOM Conversion Detail",
@@ -298,6 +313,8 @@ def _adjust_bulk_uom(
             order_by="conversion_factor asc",
         )
         for row in item_uoms:
+            if not _is_numeric_uom(row["uom"]):
+                continue
             factor = float(row["conversion_factor"])
             adjusted_rate = rate * factor
             if adjusted_rate >= _MIN_RATE_THRESHOLD and qty / factor >= 1:
@@ -308,7 +325,7 @@ def _adjust_bulk_uom(
                 )
                 return qty / factor, adjusted_rate, row["uom"]
 
-    # Step 2: Fall back to global UOM Conversion Factor table
+    # Step 2: Fall back to global UOM Conversion Factor table (only numeric UOM names)
     bulk_uoms = frappe.get_all(
         "UOM Conversion Factor",
         filters={"to_uom": uom, "value": [">", 1]},
@@ -317,6 +334,8 @@ def _adjust_bulk_uom(
     )
 
     for row in bulk_uoms:
+        if not _is_numeric_uom(row["from_uom"]):
+            continue
         factor = float(row["value"])
         adjusted_rate = rate * factor
         if adjusted_rate >= _MIN_RATE_THRESHOLD and qty / factor >= 1:
