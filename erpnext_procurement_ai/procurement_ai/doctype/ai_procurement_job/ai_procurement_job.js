@@ -180,8 +180,8 @@ var _ITEM_FIELDS = [
     { key: "unit_price", label: "Rate" },
 ];
 
-// Total extra columns after _ITEM_FIELDS: UOM, Factor, Warehouse UOM, Existing Match, Map to Item = 5
-var _EXTRA_COLS = 5;
+// Total extra columns after _ITEM_FIELDS: UOM, Factor, Warehouse UOM, Map to Item = 4
+var _EXTRA_COLS = 4;
 
 function _render_review_form(frm) {
     var consensus = {};
@@ -246,7 +246,6 @@ function _render_review_form(frm) {
             "<th>" + __("UOM") + "</th>" +
             "<th>" + __("Factor") + "</th>" +
             "<th>" + __("Warehouse UOM") + "</th>" +
-            "<th>" + __("Existing Match") + "</th>" +
             "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
 
         items.forEach(function (item, idx) {
@@ -282,13 +281,13 @@ function _render_review_form(frm) {
             html +=
                 '<td><div class="stock-uom-control" data-idx="' + idx + '"' +
                 ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"></div></td>';
-            // Existing match badge
+            // Map to Item (badge + Link control in one cell)
             html +=
-                '<td class="item-match-cell" data-idx="' + idx + '">' +
-                '<span class="text-muted">' + __("Checking...") + "</span></td>";
-            // Map to Item (Link control)
-            html +=
-                '<td><div class="item-link-control" data-idx="' + idx + '"></div></td>';
+                '<td>' +
+                '<div class="item-match-cell" data-idx="' + idx + '" style="margin-bottom:4px;">' +
+                '<span class="text-muted" style="font-size:0.8em;">' + __("Checking...") + '</span></div>' +
+                '<div class="item-link-control" data-idx="' + idx + '"></div>' +
+                '</td>';
             html += "</tr>";
         });
         html += "</tbody></table></div>";
