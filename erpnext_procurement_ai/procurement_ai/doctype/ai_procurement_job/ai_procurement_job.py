@@ -74,12 +74,12 @@ class AIProcurementJob(Document):
             return {"supplier": None, "items": []}
 
         # Sanitize data the same way build_chain does
-        from ...chain_builder.retrospective import sanitize_extracted_data
+        from ....chain_builder.retrospective import sanitize_extracted_data
 
         clean = sanitize_extracted_data(consensus)
 
         # Check supplier
-        from ...validation.supplier_matcher import SupplierMatcher
+        from ....validation.supplier_matcher import SupplierMatcher
 
         supplier_match = SupplierMatcher.find_match(clean)
         supplier_info = None
@@ -91,7 +91,7 @@ class AIProcurementJob(Document):
             }
 
         # Check each item (try_resolve only, no creation) + UOM adjustment
-        from ...chain_builder.purchase_order import (
+        from ....chain_builder.purchase_order import (
             _adjust_bulk_uom,
             _resolve_uom,
             _try_resolve_item,
