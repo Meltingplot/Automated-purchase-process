@@ -452,7 +452,11 @@ def _ensure_uom_conversion_factor(from_uom: str, to_uom: str, value: float):
 
 
 def _ensure_item_uom(item_code: str, uom: str, conversion_factor: float):
-    """Register a UOM conversion on an Item if not already present."""
+    """Register a UOM conversion on an Item if not already present.
+
+    Uses direct child-table insert instead of full Item save to avoid
+    deadlocks from Item hooks and validations.
+    """
     if not frappe.db.exists("Item", item_code):
         return
 
@@ -465,9 +469,23 @@ def _ensure_item_uom(item_code: str, uom: str, conversion_factor: float):
     if existing:
         return
 
-    item_doc = frappe.get_doc("Item", item_code)
-    item_doc.append("uoms", {"uom": uom, "conversion_factor": conversion_factor})
-    item_doc.save(ignore_permissions=True)
+    # Get current max idx for ordering
+    max_idx = frappe.db.sql(
+        """SELECT IFNULL(MAX(idx), 0) FROM `tabUOM Conversion Detail`
+           WHERE parent = %s AND parenttype = 'Item'""",
+        item_code,
+    )[0][0]
+
+    doc = frappe.get_doc({
+        "doctype": "UOM Conversion Detail",
+        "parent": item_code,
+        "parenttype": "Item",
+        "parentfield": "uoms",
+        "idx": max_idx + 1,
+        "uom": uom,
+        "conversion_factor": conversion_factor,
+    })
+    doc.db_insert()
     logger.info(
         f"Registered UOM '{uom}' (factor {conversion_factor}) on Item {item_code}"
     )
