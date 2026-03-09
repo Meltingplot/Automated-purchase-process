@@ -261,33 +261,38 @@ function _render_review_form(frm) {
                     ' data-idx="' + idx + '" data-field="' + f.key + '"' +
                     ' value="' + frappe.utils.escape_html(String(val)) + '" /></td>';
             });
-            // Compact Quantity cell
+            // Compact Quantity cell (stacked two-row layout)
             html +=
-                '<td class="qty-uom-cell" data-idx="' + idx + '" style="min-width:340px;"' +
+                '<td class="qty-uom-cell" data-idx="' + idx + '"' +
                 ' data-line-total="' + total + '" data-invoice-qty="' + qty + '"' +
-                ' data-invoice-rate="' + rate + '">' +
-                '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+                ' data-invoice-rate="' + rate + '" style="white-space:nowrap;">' +
+                // Row 1: doc-qty × rate = total
+                '<div style="display:flex;align-items:center;gap:4px;">' +
                 '<input type="number" class="form-control input-xs doc-qty" data-idx="' + idx + '"' +
-                ' step="any" style="width:80px;" value="' + qty + '" />' +
+                ' step="any" style="width:60px;" value="' + qty + '" />' +
                 '<span class="doc-rate-label" data-idx="' + idx + '"' +
-                ' style="white-space:nowrap;">' +
-                '&times; ' + format_currency(rate) + ' / ' + frappe.utils.escape_html(item_uom) +
+                ' style="font-size:0.85em;color:var(--text-muted);">' +
+                '&times;&thinsp;' + format_currency(rate) +
                 '</span>' +
-                '<span style="font-size:1.1em;">&rarr;</span>' +
+                '<span class="line-total" data-idx="' + idx + '"' +
+                ' style="margin-left:auto;font-size:0.85em;">' +
+                '=&thinsp;<strong>' + format_currency(total) + '</strong></span>' +
+                '</div>' +
+                // Row 2: stock-qty / UOM (hidden when factor=1)
+                '<div class="stock-row" data-idx="' + idx + '"' +
+                ' style="display:none;margin-top:3px;align-items:center;gap:4px;">' +
+                '<span style="font-size:0.85em;color:var(--text-muted);">&darr;</span>' +
                 '<input type="number" class="form-control input-xs stock-qty" data-idx="' + idx + '"' +
-                ' step="any" style="width:80px;" value="' + qty + '" />' +
-                '<span>/ </span>' +
+                ' step="any" style="width:60px;" value="' + qty + '" />' +
                 '<div class="stock-uom-control" data-idx="' + idx + '"' +
                 ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"' +
-                ' style="display:inline-block;width:80px;"></div>' +
-                '<span class="line-total" data-idx="' + idx + '"' +
-                ' style="margin-left:auto;white-space:nowrap;">' +
-                '= <strong>' + format_currency(total) + '</strong></span>' +
+                ' style="display:inline-block;width:70px;"></div>' +
+                '<span class="qty-info" data-idx="' + idx + '"' +
+                ' style="font-size:0.8em;color:var(--text-muted);"></span>' +
                 '</div>' +
+                // Warning line
                 '<div class="qty-warning" data-idx="' + idx + '"' +
-                ' style="display:none;font-size:0.8em;color:#c53030;margin-top:4px;"></div>' +
-                '<div class="qty-info" data-idx="' + idx + '"' +
-                ' style="font-size:0.8em;color:var(--text-muted);margin-top:2px;display:none;"></div>' +
+                ' style="display:none;font-size:0.8em;color:#c53030;margin-top:2px;"></div>' +
                 '</td>';
             // Map to Item (badge + Link control in one cell)
             html +=
@@ -795,30 +800,29 @@ function _recalc_qty_cell(wrapper, idx) {
     var factor = doc_qty > 0 ? stock_qty / doc_qty : 1;
     var is_bulk = factor > 1 && Number.isInteger(factor);
 
-    // Update rate label
-    var uom_label = is_bulk ? String(Math.round(factor)) : "Nos";
-    var $stock_uom_el = $cell.find(".stock-uom-control");
-    var stock_uom_ctrl = $stock_uom_el.data("control");
-    if (stock_uom_ctrl && !is_bulk) {
-        uom_label = stock_uom_ctrl.get_value() || "Nos";
-    }
+    // Update rate label (compact: "× €0.04")
     $cell.find('.doc-rate-label[data-idx="' + idx + '"]').html(
-        "&times; " + format_currency(rate) + " / " + frappe.utils.escape_html(uom_label)
+        "&times;&thinsp;" + format_currency(rate)
     );
 
     // Update total
     $cell.find('.line-total[data-idx="' + idx + '"]').html(
-        "= <strong>" + format_currency(line_total) + "</strong>"
+        "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
     );
 
-    // Info line (factor > 1)
-    var $info = $cell.find('.qty-info[data-idx="' + idx + '"]');
-    if (is_bulk) {
-        $info.text(
-            __("1 {0} = {1} {2}", [uom_label, Math.round(factor), "Nos"])
-        ).show();
+    // Show/hide stock row (only when factor != 1)
+    var $stock_row = $cell.find('.stock-row[data-idx="' + idx + '"]');
+    if (is_bulk || stock_qty !== doc_qty) {
+        $stock_row.css("display", "flex");
+        var $info = $cell.find('.qty-info[data-idx="' + idx + '"]');
+        if (is_bulk) {
+            var uom_label = String(Math.round(factor));
+            $info.text("(\u00d7" + Math.round(factor) + ")");
+        } else {
+            $info.text("");
+        }
     } else {
-        $info.hide();
+        $stock_row.css("display", "none");
     }
 
     // Sub-cent validation
