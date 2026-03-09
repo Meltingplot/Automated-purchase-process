@@ -278,9 +278,9 @@ function _render_review_form(frm) {
                 ' style="margin-left:auto;font-size:0.85em;">' +
                 '=&thinsp;<strong>' + format_currency(total) + '</strong></span>' +
                 '</div>' +
-                // Row 2: stock-qty / UOM (hidden when factor=1)
+                // Row 2: stock-qty / UOM
                 '<div class="stock-row" data-idx="' + idx + '"' +
-                ' style="display:none;margin-top:3px;align-items:center;gap:4px;">' +
+                ' style="display:flex;margin-top:3px;align-items:center;gap:4px;">' +
                 '<span style="font-size:0.85em;color:var(--text-muted);">&darr;</span>' +
                 '<input type="number" class="form-control input-xs stock-qty" data-idx="' + idx + '"' +
                 ' step="any" style="width:60px;" value="' + qty + '" />' +
@@ -810,19 +810,12 @@ function _recalc_qty_cell(wrapper, idx) {
         "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
     );
 
-    // Show/hide stock row (only when factor != 1)
-    var $stock_row = $cell.find('.stock-row[data-idx="' + idx + '"]');
-    if (is_bulk || stock_qty !== doc_qty) {
-        $stock_row.css("display", "flex");
-        var $info = $cell.find('.qty-info[data-idx="' + idx + '"]');
-        if (is_bulk) {
-            var uom_label = String(Math.round(factor));
-            $info.text("(\u00d7" + Math.round(factor) + ")");
-        } else {
-            $info.text("");
-        }
+    // Update factor info
+    var $info = $cell.find('.qty-info[data-idx="' + idx + '"]');
+    if (is_bulk) {
+        $info.text("(\u00d7" + Math.round(factor) + ")");
     } else {
-        $stock_row.css("display", "none");
+        $info.text("");
     }
 
     // Sub-cent validation
