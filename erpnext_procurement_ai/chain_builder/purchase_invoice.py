@@ -81,6 +81,11 @@ def create_purchase_invoice(
     if taxes:
         pi_data["taxes"] = taxes
 
+    # Apply document-level discount (Rabatt/Skonto extracted from line items)
+    if extracted_data.get("discount_amount"):
+        pi_data["apply_discount_on"] = "Net Total"
+        pi_data["discount_amount"] = extracted_data["discount_amount"]
+
     pi = frappe.get_doc(pi_data)
 
     # Set payment terms if available

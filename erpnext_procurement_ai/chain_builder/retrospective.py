@@ -399,7 +399,60 @@ def sanitize_extracted_data(data: dict) -> dict:
     else:
         clean["items"] = []
 
+    # Remove shipping line items when shipping_cost is already a separate field,
+    # to avoid double-counting (once as item row, once as tax charge).
+    if clean["shipping_cost"] and clean["shipping_cost"] > 0:
+        clean["items"] = [
+            item for item in clean["items"] if not _is_shipping_item(item)
+        ]
+
+    # Extract discount line items (Rabatt/Skonto/Vorkasse) — these reduce
+    # the document total, not individual item values or warehouse stock value.
+    # Applied as document-level discount_amount in the chain builders.
+    discount_items = [item for item in clean["items"] if _is_discount_item(item)]
+    if discount_items:
+        discount_total = sum(abs(item.get("total_price", 0)) for item in discount_items)
+        clean["discount_amount"] = discount_total
+        clean["items"] = [
+            item for item in clean["items"] if not _is_discount_item(item)
+        ]
+    else:
+        clean["discount_amount"] = None
+
     return clean
+
+
+_SHIPPING_KEYWORDS = {
+    "versand", "versandkosten", "shipping", "freight", "fracht",
+    "transport", "porto", "lieferkosten", "delivery cost", "postage",
+    "spedition", "paketversand", "logistik",
+    # Carrier names (item name often is just "DHL Paket Deutschland" etc.)
+    "dhl", "dpd", "ups", "fedex", "hermes", "gls", "tnt",
+    "paket deutschland", "paketdienst",
+}
+
+
+def _is_shipping_item(item: dict) -> bool:
+    """Detect if a line item represents shipping/freight costs."""
+    name = (item.get("item_name") or "").lower()
+    return any(kw in name for kw in _SHIPPING_KEYWORDS)
+
+
+_DISCOUNT_KEYWORDS = {
+    "rabatt", "skonto", "vorkasserabatt", "nachlass", "discount",
+    "preisnachlass", "gutschrift", "abzug",
+}
+
+
+def _is_discount_item(item: dict) -> bool:
+    """Detect if a line item represents a discount/rebate.
+
+    Matches by keyword OR by negative total_price (common for discount rows).
+    """
+    name = (item.get("item_name") or "").lower()
+    has_keyword = any(kw in name for kw in _DISCOUNT_KEYWORDS)
+    has_negative_total = (item.get("total_price") or 0) < 0
+    return has_keyword and has_negative_total
 
 
 def _sanitize_line_item(item: dict) -> dict:

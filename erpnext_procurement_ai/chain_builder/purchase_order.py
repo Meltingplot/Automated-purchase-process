@@ -101,6 +101,11 @@ def create_purchase_order(
     if taxes:
         po_data["taxes"] = taxes
 
+    # Apply document-level discount (Rabatt/Skonto extracted from line items)
+    if extracted_data.get("discount_amount"):
+        po_data["apply_discount_on"] = "Net Total"
+        po_data["discount_amount"] = extracted_data["discount_amount"]
+
     po = frappe.get_doc(po_data)
     po.insert(ignore_permissions=True)
     po.add_comment(

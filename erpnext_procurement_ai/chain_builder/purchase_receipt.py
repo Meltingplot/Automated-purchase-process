@@ -69,6 +69,11 @@ def create_purchase_receipt(
     if taxes:
         pr_data["taxes"] = taxes
 
+    # Apply document-level discount (Rabatt/Skonto extracted from line items)
+    if extracted_data.get("discount_amount"):
+        pr_data["apply_discount_on"] = "Net Total"
+        pr_data["discount_amount"] = extracted_data["discount_amount"]
+
     pr = frappe.get_doc(pr_data)
 
     pr.insert(ignore_permissions=True)
