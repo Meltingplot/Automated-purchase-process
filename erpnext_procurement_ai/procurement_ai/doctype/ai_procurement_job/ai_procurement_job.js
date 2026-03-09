@@ -121,20 +121,23 @@ frappe.ui.form.on("AI Procurement Job", {
         // Show created documents links
         _render_created_docs(frm);
 
-        // Realtime progress listener
-        frappe.realtime.on("ai_procurement_progress", function (data) {
-            if (data.job === frm.doc.name) {
-                _update_progress(frm, data.stage);
-                if (
-                    data.stage === "completed" ||
-                    data.stage === "error" ||
-                    data.stage === "needs_review" ||
-                    data.stage === "awaiting_review"
-                ) {
-                    frm.reload_doc();
+        // Realtime progress listener (register once per form instance)
+        if (!frm._realtime_bound) {
+            frm._realtime_bound = true;
+            frappe.realtime.on("ai_procurement_progress", function (data) {
+                if (data.job === frm.doc.name) {
+                    _update_progress(frm, data.stage);
+                    if (
+                        data.stage === "completed" ||
+                        data.stage === "error" ||
+                        data.stage === "needs_review" ||
+                        data.stage === "awaiting_review"
+                    ) {
+                        frm.reload_doc();
+                    }
                 }
-            }
-        });
+            });
+        }
     },
 
     source_document: function (frm) {
