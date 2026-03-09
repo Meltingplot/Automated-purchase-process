@@ -107,6 +107,7 @@ class AIProcurementJob(Document):
         from ....chain_builder.purchase_order import (
             _adjust_bulk_uom,
             _resolve_uom,
+            _true_unit_price,
             _try_resolve_item,
         )
 
@@ -125,7 +126,7 @@ class AIProcurementJob(Document):
 
             # Check if bulk UOM adjustment would apply
             qty = float(item.get("quantity", 1) or 1)
-            rate = float(item.get("unit_price", 0) or 0)
+            rate = _true_unit_price(item, qty)
             uom = _resolve_uom(item.get("uom", "Nos"))
             adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(
                 qty, rate, uom, item_code=matched, currency=invoice_currency,

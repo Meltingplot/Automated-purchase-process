@@ -126,8 +126,8 @@ def _build_items(
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
         item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
-        qty = float(item.get("quantity", 1))
-        rate = float(item.get("unit_price", 0))
+        qty = float(item.get("quantity", 1) or 1)
+        rate = _true_unit_price(item, qty)
         uom = _resolve_uom(item.get("uom", "Nos"))
 
         # Adjust for sub-cent unit prices (e.g. 1000 resistors at 0.0002 EUR)
@@ -296,6 +296,28 @@ _UOM_MAP = {
     "m": "Meter",
     "km": "Km",
 }
+
+
+def _true_unit_price(item: dict, qty: float) -> float:
+    """Derive the true unit price from the line total when available.
+
+    Invoices often round the printed unit price (e.g. 0.029) but calculate
+    the line total from a more precise value (5.88 / 200 = 0.0294).
+    In German tax law, the line total (Positionspreis) is authoritative
+    when stated, so we back-calculate from total_price / quantity.
+    """
+    total_price = item.get("total_price")
+    unit_price = float(item.get("unit_price", 0) or 0)
+
+    if total_price and qty > 0:
+        try:
+            total_price = float(total_price)
+            if total_price > 0:
+                return total_price / qty
+        except (TypeError, ValueError):
+            pass
+
+    return unit_price
 
 
 def _resolve_uom(uom: str) -> str:
