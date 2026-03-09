@@ -52,14 +52,18 @@ def create_purchase_invoice(
     if not items:
         frappe.throw("Cannot create Purchase Invoice without line items")
 
+    # Retrospective documents must not be dated later than the source document
+    doc_date = extracted_data.get("document_date") or today()
+    due = extracted_data.get("delivery_date") or doc_date
+
     pi_data = {
         "doctype": "Purchase Invoice",
         "supplier": supplier,
         "company": settings.get("default_company"),
-        "posting_date": extracted_data.get("document_date") or today(),
-        "due_date": extracted_data.get("delivery_date") or today(),
+        "posting_date": doc_date,
+        "due_date": due,
         "bill_no": extracted_data.get("document_number", ""),
-        "bill_date": extracted_data.get("document_date") or today(),
+        "bill_date": doc_date,
         "ai_retrospective": 1,
         "ai_procurement_job": job_name,
         "items": items,

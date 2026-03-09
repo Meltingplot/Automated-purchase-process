@@ -165,6 +165,15 @@ function _render_review_form(frm) {
 
     var html = '<div class="review-form" style="padding:10px;">';
 
+    // Supplier match indicator
+    html +=
+        '<div class="supplier-match-info" style="margin-bottom:14px;padding:10px;' +
+        'border-radius:6px;background:var(--subtle-fg);">' +
+        '<strong>' + __("Supplier") + ':</strong> ' +
+        '<span class="supplier-match-badge">' +
+        '<span class="text-muted">' + __("Checking...") + '</span></span>' +
+        '</div>';
+
     // Header fields
     html += '<h5 style="margin-bottom:12px;">' + __("Document Fields") + "</h5>";
     html += '<table class="table table-bordered table-sm">';
@@ -203,7 +212,9 @@ function _render_review_form(frm) {
         _ITEM_FIELDS.forEach(function (f) {
             html += "<th>" + __(f.label) + "</th>";
         });
-        html += "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
+        html +=
+            "<th>" + __("Existing Match") + "</th>" +
+            "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
 
         items.forEach(function (item, idx) {
             html += '<tr data-item-idx="' + idx + '">';
@@ -223,6 +234,9 @@ function _render_review_form(frm) {
                     ' value="' + frappe.utils.escape_html(String(val)) + '"' +
                     step_attr + " /></td>";
             });
+            html +=
+                '<td class="item-match-cell" data-idx="' + idx + '">' +
+                '<span class="text-muted">' + __("Checking...") + "</span></td>";
             html +=
                 '<td><div class="item-link-control" data-idx="' + idx + '"></div></td>';
             html += "</tr>";
@@ -254,6 +268,64 @@ function _render_review_form(frm) {
         });
         control.refresh();
         $el.data("control", control);
+    });
+
+    // Async: check which supplier/items already exist
+    frm.call("check_review_matches").then(function (r) {
+        if (!r || !r.message) return;
+        var matches = r.message;
+        _render_match_badges(wrapper, matches);
+    });
+}
+
+function _render_match_badges(wrapper, matches) {
+    // Supplier badge
+    var $supplier = wrapper.find(".supplier-match-badge");
+    if (matches.supplier) {
+        $supplier.html(
+            '<a href="/app/supplier/' +
+                encodeURIComponent(matches.supplier.name) +
+                '">' +
+                frappe.utils.escape_html(matches.supplier.name) +
+                "</a> " +
+                '<span class="badge badge-success" style="background:#38a169;color:#fff;">' +
+                __("Exists") + " (" + matches.supplier.method + ")</span>"
+        );
+    } else {
+        $supplier.html(
+            '<span class="badge badge-info" style="background:#3182ce;color:#fff;">' +
+                __("New — will be created") +
+                "</span>"
+        );
+    }
+
+    // Item badges
+    var items = matches.items || [];
+    items.forEach(function (info, idx) {
+        var $cell = wrapper.find('.item-match-cell[data-idx="' + idx + '"]');
+        if (info.exists) {
+            $cell.html(
+                '<a href="/app/item/' +
+                    encodeURIComponent(info.item_code) +
+                    '" style="font-size:0.85em;">' +
+                    frappe.utils.escape_html(info.item_code) +
+                    "</a> " +
+                    '<span class="badge badge-success" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                    __("Exists") + "</span>"
+            );
+            // Pre-fill the Link control with the matched item
+            var $link = wrapper.find('.item-link-control[data-idx="' + idx + '"]');
+            var control = $link.data("control");
+            if (control) {
+                control.set_value(info.item_code);
+            }
+        } else {
+            $cell.html(
+                '<span class="badge badge-info" style="background:#3182ce;color:#fff;font-size:0.75em;">' +
+                    __("New") +
+                    "</span>"
+            );
+        }
     });
 }
 

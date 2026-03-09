@@ -43,12 +43,15 @@ def create_purchase_receipt(
     if not items:
         frappe.throw("Cannot create Purchase Receipt without line items")
 
+    # Retrospective documents must not be dated later than the source document
+    doc_date = extracted_data.get("document_date") or today()
+
     pr = frappe.get_doc(
         {
             "doctype": "Purchase Receipt",
             "supplier": supplier,
             "company": settings.get("default_company"),
-            "posting_date": extracted_data.get("document_date") or today(),
+            "posting_date": doc_date,
             "ai_retrospective": 1,
             "ai_procurement_job": job_name,
             "items": items,

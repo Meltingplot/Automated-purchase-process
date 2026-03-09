@@ -62,8 +62,76 @@ def _create_supplier(data: dict) -> str:
         "Automatically created by AI Procurement Plugin",
     )
 
+    # Create Address if extracted data contains address info
+    if data.get("supplier_address"):
+        _create_supplier_address(supplier.name, data)
+
     logger.info(f"Created new supplier: {supplier.name}")
     return supplier.name
+
+
+def _create_supplier_address(supplier_name: str, data: dict) -> None:
+    """Create an Address linked to the supplier via Dynamic Link."""
+    country = _detect_country(data)
+    raw_address = data.get("supplier_address", "")
+
+    # Parse address lines — use full text as address_line1,
+    # extract city/pincode if possible
+    address_line1, city, pincode = _parse_address(raw_address)
+
+    address = frappe.get_doc(
+        {
+            "doctype": "Address",
+            "address_title": data.get("supplier_name", supplier_name),
+            "address_type": "Billing",
+            "address_line1": address_line1 or raw_address[:140],
+            "city": city or country,
+            "country": country,
+            "pincode": pincode or "",
+            "email_id": data.get("supplier_email", ""),
+            "phone": data.get("supplier_phone", ""),
+            "links": [
+                {
+                    "link_doctype": "Supplier",
+                    "link_name": supplier_name,
+                }
+            ],
+        }
+    )
+    address.insert(ignore_permissions=True)
+    logger.info(f"Created address {address.name} for supplier {supplier_name}")
+
+
+def _parse_address(raw: str) -> tuple[str, str, str]:
+    """
+    Best-effort parse of a free-text address into components.
+
+    Returns (address_line1, city, pincode). Any may be empty.
+    """
+    import re
+
+    if not raw:
+        return ("", "", "")
+
+    lines = [line.strip() for line in raw.replace(",", "\n").split("\n") if line.strip()]
+
+    address_line1 = lines[0] if lines else ""
+    city = ""
+    pincode = ""
+
+    # Look for German-style "12345 City" pattern in remaining lines
+    for line in lines[1:]:
+        m = re.match(r"^(\d{4,5})\s+(.+)$", line)
+        if m:
+            pincode = m.group(1)
+            city = m.group(2).strip()
+            break
+
+    # If no pincode pattern found, use last line as city
+    if not city and len(lines) > 1:
+        city = lines[-1]
+
+    return (address_line1, city, pincode)
 
 
 def _get_default_supplier_group() -> str:

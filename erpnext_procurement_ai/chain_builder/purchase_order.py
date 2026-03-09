@@ -70,12 +70,16 @@ def create_purchase_order(
     if not items:
         frappe.throw("Cannot create Purchase Order without line items")
 
+    # Retrospective documents must not be dated later than the source document
+    doc_date = extracted_data.get("document_date") or today()
+    schedule = extracted_data.get("delivery_date") or doc_date
+
     po_data = {
         "doctype": "Purchase Order",
         "supplier": supplier,
         "company": settings.get("default_company"),
-        "transaction_date": extracted_data.get("document_date") or today(),
-        "schedule_date": extracted_data.get("delivery_date") or today(),
+        "transaction_date": doc_date,
+        "schedule_date": schedule,
         "ai_retrospective": 1,
         "ai_procurement_job": job_name,
         "items": items,
@@ -114,7 +118,8 @@ def _build_items(
 ) -> list[dict]:
     """Build PO items list from extracted line items."""
     items = []
-    schedule_date = extracted_data.get("delivery_date") or today()
+    doc_date = extracted_data.get("document_date") or today()
+    schedule_date = extracted_data.get("delivery_date") or doc_date
 
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
