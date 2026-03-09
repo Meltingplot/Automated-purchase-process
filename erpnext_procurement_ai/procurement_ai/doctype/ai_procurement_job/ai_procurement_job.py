@@ -116,6 +116,7 @@ class AIProcurementJob(Document):
             uom = _resolve_uom(item.get("uom", "Nos"))
             adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(
                 qty, rate, uom, item_code=matched, currency=invoice_currency,
+                dry_run=True,
             )
             if adj_uom != uom:
                 info["uom_adjustment"] = {

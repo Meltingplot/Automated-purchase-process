@@ -304,7 +304,7 @@ def _has_cent_fractions(rate: float, currency: str | None = None) -> bool:
 
 def _adjust_bulk_uom(
     qty: float, rate: float, uom: str, item_code: str | None = None,
-    currency: str | None = None,
+    currency: str | None = None, dry_run: bool = False,
 ) -> tuple[float, float, str]:
     """
     Adjust qty/rate/uom when the per-piece price has sub-cent fractions.
@@ -360,22 +360,20 @@ def _adjust_bulk_uom(
                 )
                 return qty / factor, adjusted_rate, row["uom"]
 
-    # Step 2: Fall back to global UOM Conversion Factor table (only numeric UOM names)
+    # Step 2a: Check global UOM Conversion Factor table
     bulk_uoms = frappe.get_all(
         "UOM Conversion Factor",
         filters={"to_uom": uom, "value": [">", 1]},
         fields=["from_uom", "value"],
         order_by="value asc",
     )
-
     for row in bulk_uoms:
         if not _is_numeric_uom(row["from_uom"]):
             continue
         factor = float(row["value"])
         adjusted_rate = rate * factor
         if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
-            # Register this conversion on the item so ERPNext accepts it
-            if item_code:
+            if not dry_run and item_code:
                 _ensure_item_uom(item_code, row["from_uom"], factor)
             logger.info(
                 f"Bulk UOM adjustment (global): {qty} x {rate} {uom} "
@@ -384,7 +382,55 @@ def _adjust_bulk_uom(
             )
             return qty / factor, adjusted_rate, row["from_uom"]
 
+    # Step 2b: Scan for numeric UOMs without conversion factors yet
+    # (e.g. UOM "100" exists but no UOM Conversion Factor "100" -> "Nos")
+    known = {row["from_uom"] for row in bulk_uoms}
+    numeric_uoms = frappe.get_all("UOM", fields=["name"])
+    candidates = []
+    for row in numeric_uoms:
+        name = row["name"]
+        if name in known or name == uom or not _is_numeric_uom(name):
+            continue
+        factor = float(name)
+        if factor > 1:
+            candidates.append((name, factor))
+    candidates.sort(key=lambda x: x[1])
+
+    for uom_name, factor in candidates:
+        adjusted_rate = rate * factor
+        if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
+            if not dry_run:
+                _ensure_uom_conversion_factor(uom_name, uom, factor)
+                if item_code:
+                    _ensure_item_uom(item_code, uom_name, factor)
+            logger.info(
+                f"Bulk UOM adjustment (new numeric UOM): {qty} x {rate} {uom} "
+                f"-> {qty / factor} x {adjusted_rate} {uom_name} "
+                f"(factor {factor}, conversion factor created)"
+            )
+            return qty / factor, adjusted_rate, uom_name
+
     return qty, rate, uom
+
+
+def _ensure_uom_conversion_factor(from_uom: str, to_uom: str, value: float):
+    """Create a global UOM Conversion Factor record if it doesn't exist."""
+    existing = frappe.get_all(
+        "UOM Conversion Factor",
+        filters={"from_uom": from_uom, "to_uom": to_uom},
+        limit=1,
+    )
+    if existing:
+        return
+
+    doc = frappe.get_doc({
+        "doctype": "UOM Conversion Factor",
+        "from_uom": from_uom,
+        "to_uom": to_uom,
+        "value": value,
+    })
+    doc.insert(ignore_permissions=True)
+    logger.info(f"Created UOM Conversion Factor: 1 {from_uom} = {value} {to_uom}")
 
 
 def _ensure_item_uom(item_code: str, uom: str, conversion_factor: float):
