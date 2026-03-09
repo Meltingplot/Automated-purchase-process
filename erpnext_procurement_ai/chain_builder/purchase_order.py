@@ -938,6 +938,18 @@ def _create_item(item: dict, supplier: str, settings: dict, stock_uom: str | Non
         }
     )
 
+    # Add UOM conversion if stock UOM differs from transaction UOM
+    if effective_stock_uom != uom:
+        conversion_factor = item.get("uom_conversion_factor")
+        if conversion_factor:
+            conversion_factor = float(conversion_factor)
+        else:
+            conversion_factor = 1.0
+        new_item.append("uoms", {
+            "uom": uom,
+            "conversion_factor": conversion_factor,
+        })
+
     # Add supplier link with supplier_part_no if available
     if supplier:
         supplier_row = {"supplier": supplier}

@@ -178,8 +178,10 @@ var _ITEM_FIELDS = [
     { key: "description", label: "Description" },
     { key: "quantity", label: "Qty" },
     { key: "unit_price", label: "Rate" },
-    { key: "uom", label: "UOM" },
 ];
+
+// Total extra columns after _ITEM_FIELDS: UOM, Factor, Warehouse UOM, Existing Match, Map to Item = 5
+var _EXTRA_COLS = 5;
 
 function _render_review_form(frm) {
     var consensus = {};
@@ -241,9 +243,11 @@ function _render_review_form(frm) {
             html += "<th>" + __(f.label) + "</th>";
         });
         html +=
+            "<th>" + __("UOM") + "</th>" +
+            "<th>" + __("Factor") + "</th>" +
+            "<th>" + __("Warehouse UOM") + "</th>" +
             "<th>" + __("Existing Match") + "</th>" +
-            "<th>" + __("Map to Item") + "</th>" +
-            "<th>" + __("Stock UOM") + "</th></tr></thead><tbody>";
+            "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
 
         items.forEach(function (item, idx) {
             html += '<tr data-item-idx="' + idx + '">';
@@ -251,35 +255,40 @@ function _render_review_form(frm) {
             _ITEM_FIELDS.forEach(function (f) {
                 var val = item[f.key];
                 if (val === null || val === undefined) val = "";
-                if (f.key === "uom") {
-                    // UOM gets a Link control placeholder (rendered after)
-                    html +=
-                        '<td><div class="uom-link-control" data-idx="' + idx + '"' +
-                        ' data-initial-value="' + frappe.utils.escape_html(String(val)) + '"></div></td>';
-                } else {
-                    var input_type =
-                        f.key === "quantity" || f.key === "unit_price"
-                            ? "number"
-                            : "text";
-                    var step_attr = input_type === "number" ? ' step="any"' : "";
-                    html +=
-                        '<td><input type="' + input_type + '"' +
-                        ' class="form-control input-xs review-item-field"' +
-                        ' data-idx="' + idx + '" data-field="' + f.key + '"' +
-                        ' value="' + frappe.utils.escape_html(String(val)) + '"' +
-                        step_attr + " /></td>";
-                }
+                var input_type =
+                    f.key === "quantity" || f.key === "unit_price"
+                        ? "number"
+                        : "text";
+                var step_attr = input_type === "number" ? ' step="any"' : "";
+                html +=
+                    '<td><input type="' + input_type + '"' +
+                    ' class="form-control input-xs review-item-field"' +
+                    ' data-idx="' + idx + '" data-field="' + f.key + '"' +
+                    ' value="' + frappe.utils.escape_html(String(val)) + '"' +
+                    step_attr + " /></td>";
             });
-            html +=
-                '<td class="item-match-cell" data-idx="' + idx + '">' +
-                '<span class="text-muted">' + __("Checking...") + "</span></td>";
-            html +=
-                '<td><div class="item-link-control" data-idx="' + idx + '"></div></td>';
-            // Stock UOM — used when creating a new item
+            // UOM (Link control)
             var item_uom = item["uom"] || "Nos";
+            html +=
+                '<td><div class="uom-link-control" data-idx="' + idx + '"' +
+                ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"></div></td>';
+            // Conversion factor
+            html +=
+                '<td><input type="number" step="any"' +
+                ' class="form-control input-xs review-item-field"' +
+                ' data-idx="' + idx + '" data-field="uom_conversion_factor"' +
+                ' placeholder="1" style="width:70px;" /></td>';
+            // Warehouse / Stock UOM (Link control)
             html +=
                 '<td><div class="stock-uom-control" data-idx="' + idx + '"' +
                 ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"></div></td>';
+            // Existing match badge
+            html +=
+                '<td class="item-match-cell" data-idx="' + idx + '">' +
+                '<span class="text-muted">' + __("Checking...") + "</span></td>";
+            // Map to Item (Link control)
+            html +=
+                '<td><div class="item-link-control" data-idx="' + idx + '"></div></td>';
             html += "</tr>";
         });
         html += "</tbody></table></div>";
@@ -442,7 +451,7 @@ function _render_match_badges(wrapper, matches) {
             // Show prominent conversion banner below the row
             var $conversion_row = $(
                 '<tr class="uom-conversion-row" style="background:var(--subtle-fg);">' +
-                '<td colspan="' + (_ITEM_FIELDS.length + 4) + '" style="padding:4px 12px;">' +
+                '<td colspan="' + (_ITEM_FIELDS.length + _EXTRA_COLS + 1) + '" style="padding:4px 12px;">' +
                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.85em;">' +
                 '<span class="badge" style="background:#805ad5;color:#fff;font-size:0.8em;">' +
                     (adj.uom_exists ? __("UOM Converted") : __("UOM will be created")) + '</span>' +
@@ -525,6 +534,7 @@ function _render_needs_review_summary(frm) {
         _ITEM_FIELDS.forEach(function (f) {
             html += '<th>' + __(f.label) + '</th>';
         });
+        html += '<th>' + __("UOM") + '</th>';
         html += '</tr></thead><tbody>';
 
         items.forEach(function (item, idx) {
@@ -539,6 +549,7 @@ function _render_needs_review_summary(frm) {
                 }
                 html += '<td>' + display_val + '</td>';
             });
+            html += '<td>' + frappe.utils.escape_html(String(item["uom"] || "")) + '</td>';
             html += '</tr>';
         });
         html += '</tbody></table></div>';
@@ -647,7 +658,7 @@ function _collect_and_approve(frm) {
         var val = $input.val();
 
         if (!items[idx]) items[idx] = {};
-        if (field_key === "quantity" || field_key === "unit_price") {
+        if (field_key === "quantity" || field_key === "unit_price" || field_key === "uom_conversion_factor") {
             items[idx][field_key] = val ? parseFloat(val) : null;
         } else {
             items[idx][field_key] = val;
