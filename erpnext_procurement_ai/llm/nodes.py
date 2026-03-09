@@ -17,7 +17,7 @@ from .consensus import ConsensusEngine
 from .local_trust import LocalLLMTrustPolicy
 from .models import LLMProviderFactory
 from .output_guard import OutputGuard
-from .prompts import build_classification_messages, build_extraction_messages
+from .prompts import build_extraction_messages
 from .sanitizer import InputSanitizer
 
 logger = logging.getLogger(__name__)
@@ -87,79 +87,21 @@ def ocr_extraction_node(state: dict) -> dict:
 
 def classify_document_node(state: dict) -> dict:
     """
-    Node: Classify the document type using the first available LLM.
+    Node: Pass through the user-supplied type hint or default to Auto-Detect.
 
-    Uses a lightweight classification prompt to identify whether
-    the document is a cart, order confirmation, delivery note, or invoice.
+    Document type is determined by the extraction LLMs (via consensus on
+    the ``document_type`` field) rather than a separate classification call.
+    A dedicated classifier was removed because it used a single LLM, was
+    often wrong (e.g. labelling order confirmations as invoices), and its
+    only purpose was providing a hint that could mislead extraction.
     """
-    settings = state.get("settings", {})
     source_type_hint = state.get("source_type_hint")
 
-    # Map LLM output → DocType Select values
-    # Includes German/Dutch/French variants since LLMs sometimes respond
-    # in the document's language instead of English.
-    llm_to_frappe = {
-        "cart": "Cart",
-        "order_confirmation": "Order Confirmation",
-        "delivery_note": "Delivery Note",
-        "invoice": "Invoice",
-        # German
-        "warenkorb": "Cart",
-        "bestellbestätigung": "Order Confirmation",
-        "auftragsbestätigung": "Order Confirmation",
-        "lieferschein": "Delivery Note",
-        "rechnung": "Invoice",
-        # Dutch
-        "winkelwagen": "Cart",
-        "orderbevestiging": "Order Confirmation",
-        "opdrachtbevestiging": "Order Confirmation",
-        "pakbon": "Delivery Note",
-        "factuur": "Invoice",
-        # French
-        "panier": "Cart",
-        "confirmation de commande": "Order Confirmation",
-        "bon de livraison": "Delivery Note",
-        "facture": "Invoice",
-    }
-
-    # If user already specified a type, use it
+    # If user already specified a type, pass it through as hint
     if source_type_hint and source_type_hint != "Auto-Detect":
         return {"source_type_hint": source_type_hint}
 
-    # Auto-detect using first available LLM
-    active_providers = LLMProviderFactory.get_active_providers(settings)
-    if not active_providers:
-        return {"source_type_hint": "Invoice"}  # Default fallback
-
-    provider = active_providers[0]
-    llm = LLMProviderFactory.create(provider, settings)
-    if not llm:
-        return {"source_type_hint": "Invoice"}
-
-    try:
-        messages = build_classification_messages(state.get("raw_text", ""))
-        langchain_messages = [
-            SystemMessage(content=messages[0]["content"]),
-            HumanMessage(content=messages[1]["content"]),
-        ]
-
-        response = llm.invoke(langchain_messages)
-        result = json.loads(response.content)
-        detected_type = result.get("document_type", "invoice")
-        detected_type = llm_to_frappe.get(
-            detected_type.lower().strip(), llm_to_frappe.get(detected_type, "Invoice")
-        )
-
-        logger.info(
-            f"Job {state.get('job_name')}: Document classified as "
-            f"'{detected_type}' by {provider} "
-            f"(confidence: {result.get('confidence', 'N/A')})"
-        )
-        return {"source_type_hint": detected_type}
-
-    except Exception as e:
-        logger.warning(f"Document classification failed: {e}")
-        return {"source_type_hint": "Invoice"}
+    return {"source_type_hint": "Auto-Detect"}
 
 
 def llm_extraction_node_factory(provider: str) -> Callable:
