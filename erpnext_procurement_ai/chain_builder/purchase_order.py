@@ -134,12 +134,15 @@ def _build_items(
         item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
-        uom = _resolve_uom(item.get("uom", "Nos"))
+        uom_raw = item.get("uom", "Nos")
+        _ensure_numeric_uom_setup(uom_raw)
+        uom = _resolve_uom(uom_raw)
 
         # Adjust for sub-cent unit prices (e.g. 1000 resistors at 0.0002 EUR)
         qty, rate, uom = _adjust_bulk_uom(
             qty, rate, uom, item_code=item_code, currency=extracted_data.get("currency"),
         )
+        _ensure_numeric_uom_setup(uom, item_code)
 
         items.append(
             {
@@ -562,6 +565,22 @@ def _ensure_item_uom(item_code: str, uom: str, conversion_factor: float):
     logger.info(
         f"Registered UOM '{uom}' (factor {conversion_factor}) on Item {item_code}"
     )
+
+
+def _ensure_numeric_uom_setup(uom_raw: str, item_code: str | None = None):
+    """Ensure a numeric UOM exists with proper conversion factors.
+
+    When the review UI sets uom to e.g. "10", the UOM record, global
+    conversion factor (10 → Nos), and Item UOM Conversion Detail must
+    all exist before ERPNext's insert() runs set_missing_values().
+    """
+    if not _is_numeric_uom(uom_raw):
+        return
+    factor = float(uom_raw)
+    _ensure_uom_exists(uom_raw)
+    _ensure_uom_conversion_factor(uom_raw, "Nos", factor)
+    if item_code and frappe.db.exists("Item", item_code):
+        _ensure_item_uom(item_code, uom_raw, factor)
 
 
 def _get_default_item_group() -> str:

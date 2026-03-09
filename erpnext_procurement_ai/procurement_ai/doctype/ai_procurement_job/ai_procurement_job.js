@@ -176,11 +176,9 @@ var _ITEM_FIELDS = [
     { key: "item_code", label: "Supplier Code" },
     { key: "item_name", label: "Item Name" },
     { key: "description", label: "Description" },
-    { key: "quantity", label: "Qty" },
-    { key: "unit_price", label: "Rate" },
 ];
 
-// Total extra columns after _ITEM_FIELDS: Warehouse UOM, Map to Item = 2
+// Extra columns after _ITEM_FIELDS: Quantity (compact), Map to Item = 2
 var _EXTRA_COLS = 2;
 
 function _render_review_form(frm) {
@@ -243,32 +241,54 @@ function _render_review_form(frm) {
             html += "<th>" + __(f.label) + "</th>";
         });
         html +=
-            "<th>" + __("Warehouse UOM") + "</th>" +
+            "<th>" + __("Quantity") + "</th>" +
             "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
 
         items.forEach(function (item, idx) {
+            var qty = parseFloat(item["quantity"]) || 0;
+            var rate = parseFloat(item["unit_price"]) || 0;
+            var total = parseFloat(item["total_price"]) || (qty * rate);
+            var item_uom = item["uom"] || "Nos";
+
             html += '<tr data-item-idx="' + idx + '">';
             html += "<td>" + (idx + 1) + "</td>";
             _ITEM_FIELDS.forEach(function (f) {
                 var val = item[f.key];
                 if (val === null || val === undefined) val = "";
-                var input_type =
-                    f.key === "quantity" || f.key === "unit_price"
-                        ? "number"
-                        : "text";
-                var step_attr = input_type === "number" ? ' step="any"' : "";
                 html +=
-                    '<td><input type="' + input_type + '"' +
+                    '<td><input type="text"' +
                     ' class="form-control input-xs review-item-field"' +
                     ' data-idx="' + idx + '" data-field="' + f.key + '"' +
-                    ' value="' + frappe.utils.escape_html(String(val)) + '"' +
-                    step_attr + " /></td>";
+                    ' value="' + frappe.utils.escape_html(String(val)) + '" /></td>';
             });
-            // Warehouse / Stock UOM (Link control)
-            var item_uom = item["uom"] || "Nos";
+            // Compact Quantity cell
             html +=
-                '<td><div class="stock-uom-control" data-idx="' + idx + '"' +
-                ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"></div></td>';
+                '<td class="qty-uom-cell" data-idx="' + idx + '" style="min-width:340px;"' +
+                ' data-line-total="' + total + '" data-invoice-qty="' + qty + '"' +
+                ' data-invoice-rate="' + rate + '">' +
+                '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+                '<input type="number" class="form-control input-xs doc-qty" data-idx="' + idx + '"' +
+                ' step="any" style="width:80px;" value="' + qty + '" />' +
+                '<span class="doc-rate-label" data-idx="' + idx + '"' +
+                ' style="white-space:nowrap;">' +
+                '&times; ' + format_currency(rate) + ' / ' + frappe.utils.escape_html(item_uom) +
+                '</span>' +
+                '<span style="font-size:1.1em;">&rarr;</span>' +
+                '<input type="number" class="form-control input-xs stock-qty" data-idx="' + idx + '"' +
+                ' step="any" style="width:80px;" value="' + qty + '" />' +
+                '<span>/ </span>' +
+                '<div class="stock-uom-control" data-idx="' + idx + '"' +
+                ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"' +
+                ' style="display:inline-block;width:80px;"></div>' +
+                '<span class="line-total" data-idx="' + idx + '"' +
+                ' style="margin-left:auto;white-space:nowrap;">' +
+                '= <strong>' + format_currency(total) + '</strong></span>' +
+                '</div>' +
+                '<div class="qty-warning" data-idx="' + idx + '"' +
+                ' style="display:none;font-size:0.8em;color:#c53030;margin-top:4px;"></div>' +
+                '<div class="qty-info" data-idx="' + idx + '"' +
+                ' style="font-size:0.8em;color:var(--text-muted);margin-top:2px;display:none;"></div>' +
+                '</td>';
             // Map to Item (badge + Link control in one cell)
             html +=
                 '<td>' +
@@ -341,6 +361,16 @@ function _render_review_form(frm) {
         $el.data("control", control);
     });
 
+    // Quantity cell event handlers
+    wrapper.find(".doc-qty").on("change", function () {
+        var idx = $(this).data("idx");
+        _recalc_qty_cell(wrapper, idx);
+    });
+    wrapper.find(".stock-qty").on("change", function () {
+        var idx = $(this).data("idx");
+        _recalc_qty_cell(wrapper, idx);
+    });
+
     // Async: check which supplier/items already exist
     frm.call("check_review_matches").then(function (r) {
         if (!r || !r.message) return;
@@ -405,46 +435,14 @@ function _render_match_badges(wrapper, matches) {
             );
         }
 
-        // Show UOM adjustment — make the conversion transparent
+        // Pre-fill compact quantity cell when UOM adjustment applies
         if (info.uom_adjustment) {
             var adj = info.uom_adjustment;
-            var $row = wrapper.find('tr[data-item-idx="' + idx + '"]');
-
-            // Update qty/rate inputs to reflect the bulk conversion
-            $row.find('.review-item-field[data-field="quantity"]').val(adj.adjusted_qty);
-            $row.find('.review-item-field[data-field="unit_price"]').val(adj.adjusted_rate);
-
-            // Show prominent conversion banner below the row
-            var $conversion_row = $(
-                '<tr class="uom-conversion-row" style="background:var(--subtle-fg);">' +
-                '<td colspan="' + (_ITEM_FIELDS.length + _EXTRA_COLS + 1) + '" style="padding:4px 12px;">' +
-                '<div style="display:flex;align-items:center;gap:8px;font-size:0.85em;">' +
-                '<span class="badge" style="background:#805ad5;color:#fff;font-size:0.8em;">' +
-                    __("Bulk UOM") + '</span>' +
-                '<span style="color:var(--text-muted);">' +
-                    __("Invoice") + ': ' +
-                    '<strong>' + adj.original_qty + ' × ' +
-                    format_currency(adj.original_rate) + ' / ' +
-                    frappe.utils.escape_html(adj.original_uom) + '</strong>' +
-                '</span>' +
-                '<span style="font-size:1.2em;">→</span>' +
-                '<span style="color:var(--text-color);">' +
-                    __("ERP") + ': ' +
-                    '<strong>' + adj.adjusted_qty + ' × ' +
-                    format_currency(adj.adjusted_rate) + ' / ' +
-                    frappe.utils.escape_html(adj.bulk_uom) + '</strong>' +
-                '</span>' +
-                '<span class="text-muted" style="font-size:0.85em;">(' +
-                    __("1 {0} = {1} {2}", [
-                        frappe.utils.escape_html(adj.bulk_uom),
-                        (adj.original_qty / adj.adjusted_qty),
-                        frappe.utils.escape_html(adj.original_uom)
-                    ]) +
-                ')</span>' +
-                '</div>' +
-                '</td></tr>'
-            );
-            $row.after($conversion_row);
+            var $qty_cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
+            // doc-qty = suggested PO qty, stock-qty = original invoice qty (pieces)
+            $qty_cell.find('.doc-qty[data-idx="' + idx + '"]').val(adj.suggested_doc_qty);
+            $qty_cell.find('.stock-qty[data-idx="' + idx + '"]').val(adj.original_qty);
+            _recalc_qty_cell(wrapper, idx);
         }
     });
 }
@@ -500,22 +498,27 @@ function _render_needs_review_summary(frm) {
         _ITEM_FIELDS.forEach(function (f) {
             html += '<th>' + __(f.label) + '</th>';
         });
+        html += '<th>' + __("Qty") + '</th>';
+        html += '<th>' + __("Rate") + '</th>';
         html += '<th>' + __("UOM") + '</th>';
+        html += '<th>' + __("Total") + '</th>';
         html += '</tr></thead><tbody>';
 
         items.forEach(function (item, idx) {
+            var qty = parseFloat(item["quantity"]) || 0;
+            var rate = parseFloat(item["unit_price"]) || 0;
+            var total = parseFloat(item["total_price"]) || (qty * rate);
             html += '<tr>';
             html += '<td>' + (idx + 1) + '</td>';
             _ITEM_FIELDS.forEach(function (f) {
                 var val = item[f.key];
                 if (val === null || val === undefined) val = "";
-                var display_val = frappe.utils.escape_html(String(val));
-                if ((f.key === "unit_price") && val) {
-                    display_val = format_currency(parseFloat(val));
-                }
-                html += '<td>' + display_val + '</td>';
+                html += '<td>' + frappe.utils.escape_html(String(val)) + '</td>';
             });
+            html += '<td>' + qty + '</td>';
+            html += '<td>' + format_currency(rate) + '</td>';
             html += '<td>' + frappe.utils.escape_html(String(item["uom"] || "")) + '</td>';
+            html += '<td>' + format_currency(total) + '</td>';
             html += '</tr>';
         });
         html += '</tbody></table></div>';
@@ -615,20 +618,36 @@ function _collect_and_approve(frm) {
         }
     });
 
-    // Collect item fields (regular inputs)
+    // Collect item fields (text inputs from _ITEM_FIELDS + compact quantity cell)
     var items = consensus.items ? consensus.items.slice() : [];
     wrapper.find(".review-item-field").each(function () {
         var $input = $(this);
         var idx = parseInt($input.data("idx"), 10);
         var field_key = $input.data("field");
-        var val = $input.val();
-
         if (!items[idx]) items[idx] = {};
-        if (field_key === "quantity" || field_key === "unit_price") {
-            items[idx][field_key] = val ? parseFloat(val) : null;
-        } else {
-            items[idx][field_key] = val;
-        }
+        items[idx][field_key] = $input.val();
+    });
+
+    // Collect compact quantity/UOM data from each qty-uom-cell
+    wrapper.find(".qty-uom-cell").each(function () {
+        var $cell = $(this);
+        var idx = parseInt($cell.data("idx"), 10);
+        if (!items[idx]) items[idx] = {};
+
+        var doc_qty = parseFloat($cell.find('.doc-qty').val()) || 0;
+        var stock_qty_val = parseFloat($cell.find('.stock-qty').val()) || 0;
+        var line_total = parseFloat($cell.data("line-total")) || 0;
+        var $stock_uom_el = $cell.find('.stock-uom-control');
+        var stock_uom_ctrl = $stock_uom_el.data("control");
+        var resolved_uom = stock_uom_ctrl ? (stock_uom_ctrl.get_value() || "Nos") : "Nos";
+
+        var factor = doc_qty > 0 ? stock_qty_val / doc_qty : 1;
+        var is_bulk = factor > 1 && Number.isInteger(factor);
+
+        items[idx].quantity = doc_qty;
+        items[idx].unit_price = doc_qty > 0 ? line_total / doc_qty : 0;
+        items[idx].total_price = line_total;
+        items[idx].uom = is_bulk ? String(Math.round(factor)) : resolved_uom;
     });
 
     reviewed.items = items;
@@ -758,6 +777,103 @@ function _set_stock_uom_editable(wrapper, idx) {
         control.$input.prop("disabled", false);
         control.$input.css("background", "");
     }
+}
+
+// =================================================================
+// Compact quantity cell helpers
+// =================================================================
+
+function _recalc_qty_cell(wrapper, idx) {
+    var $cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
+    if (!$cell.length) return;
+
+    var line_total = parseFloat($cell.data("line-total")) || 0;
+    var doc_qty = parseFloat($cell.find(".doc-qty").val()) || 0;
+    var stock_qty = parseFloat($cell.find(".stock-qty").val()) || 0;
+
+    var rate = doc_qty > 0 ? line_total / doc_qty : 0;
+    var factor = doc_qty > 0 ? stock_qty / doc_qty : 1;
+    var is_bulk = factor > 1 && Number.isInteger(factor);
+
+    // Update rate label
+    var uom_label = is_bulk ? String(Math.round(factor)) : "Nos";
+    var $stock_uom_el = $cell.find(".stock-uom-control");
+    var stock_uom_ctrl = $stock_uom_el.data("control");
+    if (stock_uom_ctrl && !is_bulk) {
+        uom_label = stock_uom_ctrl.get_value() || "Nos";
+    }
+    $cell.find('.doc-rate-label[data-idx="' + idx + '"]').html(
+        "&times; " + format_currency(rate) + " / " + frappe.utils.escape_html(uom_label)
+    );
+
+    // Update total
+    $cell.find('.line-total[data-idx="' + idx + '"]').html(
+        "= <strong>" + format_currency(line_total) + "</strong>"
+    );
+
+    // Info line (factor > 1)
+    var $info = $cell.find('.qty-info[data-idx="' + idx + '"]');
+    if (is_bulk) {
+        $info.text(
+            __("1 {0} = {1} {2}", [uom_label, Math.round(factor), "Nos"])
+        ).show();
+    } else {
+        $info.hide();
+    }
+
+    // Sub-cent validation
+    _validate_rate(wrapper, idx, rate, line_total, doc_qty);
+}
+
+function _validate_rate(wrapper, idx, rate, total, current_left) {
+    var $cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
+    var $warning = $cell.find('.qty-warning[data-idx="' + idx + '"]');
+    var $doc_qty = $cell.find('.doc-qty[data-idx="' + idx + '"]');
+
+    if (!_has_cent_fractions_js(rate)) {
+        $warning.hide();
+        $doc_qty.css("border-color", "");
+        return;
+    }
+
+    var total_cents = Math.round(total * 100);
+    var suggestions = _find_nearby_divisors(total_cents, current_left, 3);
+    if (suggestions.length === 0) {
+        $warning.hide();
+        return;
+    }
+    var msg = __("Sub-cent rate") + ". " + __("Try") + ": " +
+        suggestions.map(function (s) {
+            return s + " (" + format_currency(total / s) + ")";
+        }).join(", ");
+    $warning.text(msg).show();
+    $doc_qty.css("border-color", "#c53030");
+}
+
+function _has_cent_fractions_js(rate) {
+    // Check if rate has more than 2 decimal places
+    return Math.abs(Math.round(rate * 100) / 100 - rate) > 1e-9;
+}
+
+function _find_nearby_divisors(total_cents, near, count) {
+    // Find 'count' divisors of total_cents closest to 'near'
+    if (total_cents <= 0 || !near) return [];
+    var divisors = [];
+    var limit = Math.min(total_cents, near * 10);
+    for (var d = 1; d <= limit; d++) {
+        if (total_cents % d === 0) {
+            divisors.push(d);
+        }
+    }
+    // Sort by distance from 'near'
+    divisors.sort(function (a, b) {
+        return Math.abs(a - near) - Math.abs(b - near);
+    });
+    // Exclude the current value if it's a sub-cent rate
+    divisors = divisors.filter(function (d) {
+        return d !== near;
+    });
+    return divisors.slice(0, count);
 }
 
 function _update_progress(frm, stage) {

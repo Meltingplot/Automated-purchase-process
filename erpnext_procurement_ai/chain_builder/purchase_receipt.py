@@ -100,6 +100,7 @@ def _build_receipt_items(
 
     from .purchase_order import (
         _adjust_bulk_uom,
+        _ensure_numeric_uom_setup,
         _resolve_item,
         _resolve_uom,
         _true_unit_price,
@@ -111,10 +112,13 @@ def _build_receipt_items(
         item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
-        uom = _resolve_uom(item.get("uom", "Nos"))
+        uom_raw = item.get("uom", "Nos")
+        _ensure_numeric_uom_setup(uom_raw)
+        uom = _resolve_uom(uom_raw)
         qty, rate, uom = _adjust_bulk_uom(
             qty, rate, uom, item_code=item_code, currency=extracted_data.get("currency"),
         )
+        _ensure_numeric_uom_setup(uom, item_code)
 
         receipt_item = {
             "item_code": item_code,

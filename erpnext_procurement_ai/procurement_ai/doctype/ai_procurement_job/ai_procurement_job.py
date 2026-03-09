@@ -142,10 +142,8 @@ class AIProcurementJob(Document):
             )
             if adj_uom != uom:
                 info["uom_adjustment"] = {
-                    "original_uom": uom,
-                    "bulk_uom": adj_uom,
                     "original_qty": qty,
-                    "adjusted_qty": adj_qty,
+                    "suggested_doc_qty": adj_qty,
                     "original_rate": rate,
                     "adjusted_rate": adj_rate,
                 }
