@@ -95,12 +95,31 @@ def classify_document_node(state: dict) -> dict:
     settings = state.get("settings", {})
     source_type_hint = state.get("source_type_hint")
 
-    # Map LLM lowercase output → DocType Select values
+    # Map LLM output → DocType Select values
+    # Includes German/Dutch/French variants since LLMs sometimes respond
+    # in the document's language instead of English.
     llm_to_frappe = {
         "cart": "Cart",
         "order_confirmation": "Order Confirmation",
         "delivery_note": "Delivery Note",
         "invoice": "Invoice",
+        # German
+        "warenkorb": "Cart",
+        "bestellbestätigung": "Order Confirmation",
+        "auftragsbestätigung": "Order Confirmation",
+        "lieferschein": "Delivery Note",
+        "rechnung": "Invoice",
+        # Dutch
+        "winkelwagen": "Cart",
+        "orderbevestiging": "Order Confirmation",
+        "opdrachtbevestiging": "Order Confirmation",
+        "pakbon": "Delivery Note",
+        "factuur": "Invoice",
+        # French
+        "panier": "Cart",
+        "confirmation de commande": "Order Confirmation",
+        "bon de livraison": "Delivery Note",
+        "facture": "Invoice",
     }
 
     # If user already specified a type, use it
@@ -127,7 +146,9 @@ def classify_document_node(state: dict) -> dict:
         response = llm.invoke(langchain_messages)
         result = json.loads(response.content)
         detected_type = result.get("document_type", "invoice")
-        detected_type = llm_to_frappe.get(detected_type, detected_type)
+        detected_type = llm_to_frappe.get(
+            detected_type.lower().strip(), llm_to_frappe.get(detected_type, "Invoice")
+        )
 
         logger.info(
             f"Job {state.get('job_name')}: Document classified as "
