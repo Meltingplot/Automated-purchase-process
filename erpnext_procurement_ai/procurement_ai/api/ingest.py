@@ -125,6 +125,7 @@ def run_extraction_pipeline(procurement_job_name: str):
             {"job": job_name, "stage": "ocr_complete"},
             doctype="AI Procurement Job",
             docname=job_name,
+            after_commit=True,
         )
 
         # Step 2: Run LangGraph pipeline
@@ -156,6 +157,7 @@ def run_extraction_pipeline(procurement_job_name: str):
             {"job": job_name, "stage": "extraction_complete"},
             doctype="AI Procurement Job",
             docname=job_name,
+            after_commit=True,
         )
 
         # Step 3: Save extraction results to child table
@@ -244,6 +246,7 @@ def run_extraction_pipeline(procurement_job_name: str):
             {"job": job_name, "stage": "error", "error": str(e)},
             doctype="AI Procurement Job",
             docname=job_name,
+            after_commit=True,
         )
 
 
@@ -376,6 +379,7 @@ def run_chain_from_review(procurement_job_name: str):
             {"job": job_name, "stage": "error", "error": str(e)},
             doctype="AI Procurement Job",
             docname=job_name,
+            after_commit=True,
         )
 
 
