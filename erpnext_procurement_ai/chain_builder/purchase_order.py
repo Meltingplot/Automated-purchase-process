@@ -246,18 +246,25 @@ _UOM_MAP = {
 
 
 def _resolve_uom(uom: str) -> str:
-    """Map LLM-extracted UOM to a valid ERPNext UOM."""
+    """Map LLM-extracted UOM to a valid ERPNext UOM.
+
+    Checks the alias map first so that e.g. "STK", "Stk", "stk" all
+    resolve to the canonical "Nos" rather than a case-variant that
+    exists in MariaDB due to case-insensitive collation.
+    """
     if not uom:
         return "Nos"
 
-    # Check if UOM exists in ERPNext as-is
-    if frappe.db.exists("UOM", uom):
-        return uom
-
-    # Try mapping
+    # Try mapping first (normalizes LLM case variants like STK/Stk/stk → Nos)
     mapped = _UOM_MAP.get(uom.lower().strip())
     if mapped and frappe.db.exists("UOM", mapped):
         return mapped
+
+    # Check if UOM exists in ERPNext as-is (exact or case-insensitive match)
+    # Use get_value to retrieve the actual stored name (correct case)
+    stored = frappe.db.get_value("UOM", uom, "name")
+    if stored:
+        return stored
 
     return "Nos"
 
@@ -336,8 +343,8 @@ def _adjust_bulk_uom(
         return qty, rate, uom
 
     # Only adjust piece-type UOMs — bulk packaging doesn't apply to kg/m/etc.
-    _PIECE_UOMS = {"Nos", "Stk", "Stück", "pcs"}
-    if uom not in _PIECE_UOMS:
+    _PIECE_UOMS = {"nos", "stk", "stück", "pcs"}
+    if uom.lower() not in _PIECE_UOMS:
         return qty, rate, uom
 
     # Build list of equivalent UOM names to check conversion factors against
