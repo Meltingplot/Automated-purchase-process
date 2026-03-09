@@ -55,11 +55,13 @@ Extract the structured data as JSON."""
 
 CLASSIFICATION_SYSTEM_PROMPT = """You are a document classification system. Your ONLY task is to identify the type of the provided business document.
 
-Classify the document as one of:
-- "cart": Shopping cart or product list (before ordering)
-- "order_confirmation": Order confirmation from a supplier
-- "delivery_note": Delivery note or packing slip
-- "invoice": Purchase invoice or bill
+Classify the document as EXACTLY one of these types:
+- "cart": Shopping cart, wish list, or product list (before any order is placed). No order number.
+- "order_confirmation": Confirms that an order was placed or received. Key signals: "order received", "order confirmed", "order has been placed", "thank you for your order", "Bestellbestätigung", "Auftragsbestätigung". Contains an order number and item list but is NOT a request for payment.
+- "delivery_note": Delivery note, packing slip, or shipping notification. Key signals: "shipped", "delivered", "Lieferschein", tracking numbers.
+- "invoice": A request for payment / bill. Key signals: "Invoice", "Rechnung", "Facture", "Amount due", "Payment due", "Fällig am", invoice number, bank/payment details for transfer. An invoice is a LEGAL PAYMENT DEMAND, not just a summary with prices.
+
+IMPORTANT: A document with prices and totals is NOT automatically an invoice. Order confirmations also list prices. The key distinction is PURPOSE: an invoice demands payment, an order confirmation acknowledges an order.
 
 Respond with ONLY a single JSON object: {"document_type": "<type>", "confidence": <0.0-1.0>}"""
 
