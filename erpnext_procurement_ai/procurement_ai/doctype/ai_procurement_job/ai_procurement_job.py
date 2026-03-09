@@ -31,6 +31,7 @@ class AIProcurementJob(Document):
 
         self.status = "Processing"
         self.save()
+        frappe.db.commit()  # Release row lock before enqueuing
 
         frappe.enqueue(
             "erpnext_procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
@@ -52,6 +53,7 @@ class AIProcurementJob(Document):
 
         self.status = "Processing"
         self.save()
+        frappe.db.commit()  # Release row lock before enqueuing
 
         frappe.enqueue(
             "erpnext_procurement_ai.procurement_ai.api.ingest.run_chain_from_review",
