@@ -172,9 +172,10 @@ def run_extraction_pipeline(procurement_job_name: str):
                 str(r)[:500] for r in reasons if isinstance(r, str)
             )
             job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
-            job.consensus_data = json.dumps(result.get("consensus") or {})
-            job.detected_type = _validate_source_type(
-                result.get("source_type_hint", "")
+            consensus = result.get("consensus") or {}
+            job.consensus_data = json.dumps(consensus)
+            job.detected_type = _resolve_detected_type(
+                result.get("source_type_hint", ""), consensus,
             )
             job.save()
             frappe.db.commit()
@@ -198,7 +199,7 @@ def run_extraction_pipeline(procurement_job_name: str):
             job.status = "Awaiting Review"
             job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
             job.consensus_data = json.dumps(consensus_data)
-            job.detected_type = _validate_source_type(source_type)
+            job.detected_type = _resolve_detected_type(source_type, consensus_data)
             job.save()
             frappe.db.commit()
 
@@ -265,7 +266,7 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
 
     job.confidence_score = confidence
     job.consensus_data = json.dumps(consensus_data)
-    job.detected_type = _validate_source_type(source_type)
+    job.detected_type = _resolve_detected_type(source_type, consensus_data)
     job.created_supplier = created.get("supplier")
     job.created_po = created.get("purchase_order")
     job.created_receipt = created.get("purchase_receipt")
@@ -530,12 +531,40 @@ def _create_escalation(job, pipeline_result: dict):
 
 _VALID_SOURCE_TYPES = {"", "Cart", "Order Confirmation", "Delivery Note", "Invoice"}
 
+# Extraction LLMs return lowercase keys; map to Frappe Select values
+_EXTRACTION_TYPE_MAP = {
+    "cart": "Cart",
+    "order_confirmation": "Order Confirmation",
+    "delivery_note": "Delivery Note",
+    "invoice": "Invoice",
+}
+
 
 def _validate_source_type(value: str) -> str:
     """Validate source type against DocType Select options."""
     if isinstance(value, str) and value in _VALID_SOURCE_TYPES:
         return value
     return ""
+
+
+def _resolve_detected_type(
+    classifier_hint: str, consensus_data: dict | None = None,
+) -> str:
+    """Determine the best detected_type from classifier + consensus.
+
+    The extraction LLMs (via consensus ``document_type``) see the full
+    document content and are often more accurate than the lightweight
+    classifier.  When the consensus has a valid ``document_type``, prefer
+    it over the classifier hint.
+    """
+    # Prefer consensus document_type (multiple LLMs agreeing)
+    if consensus_data:
+        consensus_type = consensus_data.get("document_type", "")
+        mapped = _EXTRACTION_TYPE_MAP.get(consensus_type, "")
+        if mapped:
+            return mapped
+
+    return _validate_source_type(classifier_hint)
 
 
 def _determine_escalation_type(reasons: list[str]) -> str:
