@@ -421,28 +421,12 @@ def _adjust_bulk_uom(
     """
     Adjust qty/rate/uom when the per-piece price has sub-cent fractions.
 
-    Precision is checked against the document currency using
-    ``smallest_currency_fraction_value`` from the Currency doctype.
-    ERPNext handles conversion to company currency automatically via
-    ``conversion_rate`` on the document.
-
-    ERPNext requires UOM conversions to be registered on the specific Item's
-    ``uoms`` child table. So we check in order:
-
-    1. Item-specific conversions (``UOM Conversion Detail`` child of Item)
-    2. Global ``UOM Conversion Factor`` table (fallback)
-
-    If a suitable bulk UOM is found:
-      new_qty  = qty / factor
-      new_rate = rate * factor
-      new_uom  = bulk_uom
-
-    If the conversion came from the global table and the item exists, the
-    conversion is registered on the item so ERPNext accepts it on transactions.
+    Uses a two-step approach:
+    1. Check item's existing numeric UOM conversions (avoid duplicates).
+    2. Try powers of 10 (10→100→1000→10000), then fall back to qty itself
+       (giving qty=1). Auto-creates UOM + conversion factor as needed.
 
     Only applies to piece-type UOMs (Nos) where bulk packaging makes sense.
-    Only considers numeric UOM names (10, 25, 50, 100, 1000, ...) — named
-    UOMs like 'Box' or 'Tray' are skipped as they have item-specific meanings.
     """
     if not _has_cent_fractions(rate, currency) or rate <= 0 or qty <= 0:
         return qty, rate, uom
@@ -451,16 +435,6 @@ def _adjust_bulk_uom(
     _PIECE_UOMS = {"nos", "stk", "stück", "pcs"}
     if uom.lower() not in _PIECE_UOMS:
         return qty, rate, uom
-
-    # Build list of equivalent UOM names to check conversion factors against
-    # (user may have set up "Stk" -> "10" instead of "Nos" -> "10")
-    uom_aliases = {uom}
-    for alias, target in _UOM_MAP.items():
-        if target == "Nos":
-            # Add the alias if it exists as a UOM in ERPNext
-            uom_aliases.add(alias.capitalize())
-            uom_aliases.add(alias)
-    uom_aliases.update(_PIECE_UOMS)
 
     # Step 1: Check item-specific UOM conversions (only numeric UOM names)
     if item_code and frappe.db.exists("Item", item_code):
@@ -483,118 +457,39 @@ def _adjust_bulk_uom(
                 )
                 return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), row["uom"]
 
-    # Step 2a: Check global UOM Conversion Factor table
-    bulk_uoms = frappe.get_all(
-        "UOM Conversion Factor",
-        filters={"to_uom": ["in", list(uom_aliases)], "value": [">", 1]},
-        fields=["from_uom", "value"],
-        order_by="value asc",
-    )
-    for row in bulk_uoms:
-        if not _is_numeric_uom(row["from_uom"]):
-            continue
-        factor = float(row["value"])
+    # Step 2: Compute optimal bulk factor and create UOM + conversions
+    factor = _compute_bulk_factor(qty, rate, currency)
+    if factor is not None:
+        uom_name = str(int(factor)) if factor == int(factor) else str(factor)
         adjusted_rate = rate * factor
-        if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
-            if not dry_run and item_code:
-                _ensure_item_uom(item_code, row["from_uom"], factor)
-            logger.info(
-                f"Bulk UOM adjustment (global): {qty} x {rate} {uom} "
-                f"-> {qty / factor} x {adjusted_rate} {row['from_uom']} "
-                f"(factor {factor})"
-            )
-            return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), row["from_uom"]
-
-    # Step 2b: Scan for numeric UOMs without conversion factors yet
-    # (e.g. UOM "100" exists but no UOM Conversion Factor "100" -> "Nos")
-    known = {row["from_uom"] for row in bulk_uoms}
-    numeric_uoms = frappe.get_all("UOM", fields=["name"])
-    candidates = []
-    for row in numeric_uoms:
-        name = row["name"]
-        if name in known or name == uom or not _is_numeric_uom(name):
-            continue
-        factor = float(name)
-        if factor > 1:
-            candidates.append((name, factor))
-    int_qty = int(qty) if qty == int(qty) else 0
-    candidates.sort(key=lambda x: (
-        0 if _is_power_of_10(int(x[1])) else (1 if int(x[1]) == int_qty and int_qty > 1 else 2),
-        x[1],
-    ))
-
-    for uom_name, factor in candidates:
-        adjusted_rate = rate * factor
-        if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
-            if not dry_run:
-                _ensure_uom_conversion_factor(uom_name, uom, factor)
-                if item_code:
-                    _ensure_item_uom(item_code, uom_name, factor)
-            logger.info(
-                f"Bulk UOM adjustment (new numeric UOM): {qty} x {rate} {uom} "
-                f"-> {qty / factor} x {adjusted_rate} {uom_name} "
-                f"(factor {factor}, conversion factor created)"
-            )
-            return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), uom_name
-
-    # Step 3: No existing UOM works — compute factor from qty divisors
-    # and auto-create UOM + conversion factor if a suitable one is found
-    if qty == int(qty) and int(qty) > 1:
-        int_qty = int(qty)
-        divisors = _divisors(int_qty)
-        for factor in divisors:
-            if factor <= 1:
-                continue
-            adjusted_rate = rate * factor
-            if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
-                uom_name = str(factor)
-                if not dry_run:
-                    _ensure_uom_exists(uom_name)
-                    _ensure_uom_conversion_factor(uom_name, uom, factor)
-                    if item_code:
-                        _ensure_item_uom(item_code, uom_name, factor)
-                logger.info(
-                    f"Bulk UOM adjustment (auto-created UOM): {qty} x {rate} {uom} "
-                    f"-> {qty / factor} x {adjusted_rate} {uom_name} "
-                    f"(factor {factor}, UOM + conversion factor created)"
-                )
-                return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), uom_name
+        if not dry_run:
+            _ensure_uom_exists(uom_name)
+            _ensure_uom_conversion_factor(uom_name, uom, factor)
+            if item_code:
+                _ensure_item_uom(item_code, uom_name, factor)
+        logger.info(
+            f"Bulk UOM adjustment: {qty} x {rate} {uom} "
+            f"-> {qty / factor} x {adjusted_rate} {uom_name} "
+            f"(factor {factor})"
+        )
+        return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), uom_name
 
     return qty, rate, uom
 
 
-def _is_power_of_10(n: int) -> bool:
-    """Check if n is a power of 10 (10, 100, 1000, ...)."""
-    if n <= 0:
-        return False
-    while n > 1:
-        if n % 10 != 0:
-            return False
-        n //= 10
-    return True
+def _compute_bulk_factor(qty: float, rate: float, currency: str | None) -> float | None:
+    """Find the smallest power-of-10 factor that eliminates sub-cent fractions.
 
-
-def _divisors(n: int) -> list[int]:
-    """Return divisors of n (excluding 1), ordered by preference.
-
-    Preference: powers of 10 ascending, then n itself (qty=1),
-    then remaining divisors ascending.
+    Tries 10, 100, 1000, 10000 in order. If none work and the quantity
+    itself produces a representable rate (giving qty=1), uses that instead.
+    Returns None if no suitable factor is found.
     """
-    divs = set()
-    for i in range(2, int(n**0.5) + 1):
-        if n % i == 0:
-            divs.add(i)
-            divs.add(n // i)
-    divs.add(n)
-
-    def _sort_key(d):
-        if _is_power_of_10(d):
-            return (0, d)      # powers of 10, ascending
-        if d == n:
-            return (1, 0)      # qty itself (gives qty=1), before other divisors
-        return (2, d)          # remaining divisors, ascending
-
-    return sorted(divs, key=_sort_key)
+    for factor in (10, 100, 1000, 10000):
+        if not _has_cent_fractions(rate * factor, currency) and qty / factor >= 1:
+            return float(factor)
+    if qty > 1 and not _has_cent_fractions(rate * qty, currency):
+        return qty
+    return None
 
 
 def _ensure_uom_exists(uom_name: str):
@@ -963,9 +858,8 @@ def _create_item(item: dict, supplier: str, settings: dict, stock_uom: str | Non
 
     # Add UOM conversion if stock UOM differs from transaction UOM
     if effective_stock_uom != uom:
-        conversion_factor = item.get("uom_conversion_factor")
-        if conversion_factor:
-            conversion_factor = float(conversion_factor)
+        if _is_numeric_uom(uom):
+            conversion_factor = float(uom)
         else:
             conversion_factor = 1.0
         new_item.append("uoms", {

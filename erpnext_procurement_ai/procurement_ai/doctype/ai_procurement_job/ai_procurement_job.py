@@ -148,7 +148,6 @@ class AIProcurementJob(Document):
                     "adjusted_qty": adj_qty,
                     "original_rate": rate,
                     "adjusted_rate": adj_rate,
-                    "uom_exists": bool(frappe.db.exists("UOM", adj_uom)),
                 }
 
             items_info.append(info)

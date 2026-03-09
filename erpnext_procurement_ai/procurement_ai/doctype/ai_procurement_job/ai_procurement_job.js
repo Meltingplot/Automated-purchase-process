@@ -180,8 +180,8 @@ var _ITEM_FIELDS = [
     { key: "unit_price", label: "Rate" },
 ];
 
-// Total extra columns after _ITEM_FIELDS: UOM, Factor, Warehouse UOM, Map to Item = 4
-var _EXTRA_COLS = 4;
+// Total extra columns after _ITEM_FIELDS: Warehouse UOM, Map to Item = 2
+var _EXTRA_COLS = 2;
 
 function _render_review_form(frm) {
     var consensus = {};
@@ -243,8 +243,6 @@ function _render_review_form(frm) {
             html += "<th>" + __(f.label) + "</th>";
         });
         html +=
-            "<th>" + __("UOM") + "</th>" +
-            "<th>" + __("Factor") + "</th>" +
             "<th>" + __("Warehouse UOM") + "</th>" +
             "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
 
@@ -266,18 +264,8 @@ function _render_review_form(frm) {
                     ' value="' + frappe.utils.escape_html(String(val)) + '"' +
                     step_attr + " /></td>";
             });
-            // UOM (Link control)
-            var item_uom = item["uom"] || "Nos";
-            html +=
-                '<td><div class="uom-link-control" data-idx="' + idx + '"' +
-                ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"></div></td>';
-            // Conversion factor
-            html +=
-                '<td><input type="number" step="any"' +
-                ' class="form-control input-xs review-item-field"' +
-                ' data-idx="' + idx + '" data-field="uom_conversion_factor"' +
-                ' placeholder="1" style="width:70px;" /></td>';
             // Warehouse / Stock UOM (Link control)
+            var item_uom = item["uom"] || "Nos";
             html +=
                 '<td><div class="stock-uom-control" data-idx="' + idx + '"' +
                 ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"></div></td>';
@@ -330,25 +318,6 @@ function _render_review_form(frm) {
             render_input: true,
         });
         control.refresh();
-        $el.data("control", control);
-    });
-
-    // Create Frappe Link controls for UOM fields
-    wrapper.find(".uom-link-control").each(function () {
-        var $el = $(this);
-        var idx = $el.data("idx");
-        var initial_val = $el.data("initial-value") || "Nos";
-        var control = frappe.ui.form.make_control({
-            df: {
-                fieldtype: "Link",
-                fieldname: "uom_" + idx,
-                options: "UOM",
-            },
-            parent: $el,
-            render_input: true,
-        });
-        control.refresh();
-        control.set_value(initial_val);
         $el.data("control", control);
     });
 
@@ -406,13 +375,8 @@ function _render_match_badges(wrapper, matches) {
     items.forEach(function (info, idx) {
         var $cell = wrapper.find('.item-match-cell[data-idx="' + idx + '"]');
 
-        // Set resolved UOM on both UOM and Stock UOM controls
+        // Set resolved UOM on Stock UOM control
         if (info.resolved_uom) {
-            var $uom_link = wrapper.find('.uom-link-control[data-idx="' + idx + '"]');
-            var uom_control = $uom_link.data("control");
-            if (uom_control) {
-                uom_control.set_value(info.resolved_uom);
-            }
             var $stock_uom = wrapper.find('.stock-uom-control[data-idx="' + idx + '"]');
             var stock_uom_control = $stock_uom.data("control");
             if (stock_uom_control) {
@@ -446,17 +410,9 @@ function _render_match_badges(wrapper, matches) {
             var adj = info.uom_adjustment;
             var $row = wrapper.find('tr[data-item-idx="' + idx + '"]');
 
-            // Only update qty/rate/uom inputs if the adjusted UOM exists
-            // (auto-created UOMs from divisor computation don't exist yet)
-            if (adj.uom_exists) {
-                $row.find('.review-item-field[data-field="quantity"]').val(adj.adjusted_qty);
-                $row.find('.review-item-field[data-field="unit_price"]').val(adj.adjusted_rate);
-                var $uom_adj = wrapper.find('.uom-link-control[data-idx="' + idx + '"]');
-                var uom_adj_control = $uom_adj.data("control");
-                if (uom_adj_control) {
-                    uom_adj_control.set_value(adj.bulk_uom);
-                }
-            }
+            // Update qty/rate inputs to reflect the bulk conversion
+            $row.find('.review-item-field[data-field="quantity"]').val(adj.adjusted_qty);
+            $row.find('.review-item-field[data-field="unit_price"]').val(adj.adjusted_rate);
 
             // Show prominent conversion banner below the row
             var $conversion_row = $(
@@ -464,7 +420,7 @@ function _render_match_badges(wrapper, matches) {
                 '<td colspan="' + (_ITEM_FIELDS.length + _EXTRA_COLS + 1) + '" style="padding:4px 12px;">' +
                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.85em;">' +
                 '<span class="badge" style="background:#805ad5;color:#fff;font-size:0.8em;">' +
-                    (adj.uom_exists ? __("UOM Converted") : __("UOM will be created")) + '</span>' +
+                    __("Bulk UOM") + '</span>' +
                 '<span style="color:var(--text-muted);">' +
                     __("Invoice") + ': ' +
                     '<strong>' + adj.original_qty + ' × ' +
@@ -668,21 +624,13 @@ function _collect_and_approve(frm) {
         var val = $input.val();
 
         if (!items[idx]) items[idx] = {};
-        if (field_key === "quantity" || field_key === "unit_price" || field_key === "uom_conversion_factor") {
+        if (field_key === "quantity" || field_key === "unit_price") {
             items[idx][field_key] = val ? parseFloat(val) : null;
         } else {
             items[idx][field_key] = val;
         }
     });
 
-    // Collect UOM from Link controls
-    wrapper.find(".uom-link-control").each(function () {
-        var $el = $(this);
-        var idx = parseInt($el.data("idx"), 10);
-        var control = $el.data("control");
-        if (!items[idx]) items[idx] = {};
-        items[idx]["uom"] = control ? control.get_value() || "Nos" : "Nos";
-    });
     reviewed.items = items;
 
     // Collect item mapping

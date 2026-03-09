@@ -414,5 +414,4 @@ def _sanitize_line_item(item: dict) -> dict:
         "total_price": _clean_numeric(item.get("total_price")) or 0,
         "tax_rate": _clean_numeric(item.get("tax_rate")),
         "discount_percent": _clean_numeric(item.get("discount_percent")),
-        "uom_conversion_factor": _clean_numeric(item.get("uom_conversion_factor")),
     }
