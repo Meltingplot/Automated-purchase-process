@@ -377,14 +377,14 @@ function _render_match_badges(wrapper, matches) {
                 '<span style="color:var(--text-muted);">' +
                     __("Invoice") + ': ' +
                     '<strong>' + adj.original_qty + ' × ' +
-                    frappe.format_currency(adj.original_rate) + ' ' +
+                    adj.original_rate + ' ' +
                     frappe.utils.escape_html(adj.original_uom) + '</strong>' +
                 '</span>' +
                 '<span style="font-size:1.2em;">→</span>' +
                 '<span style="color:var(--text-color);">' +
                     __("ERP") + ': ' +
                     '<strong>' + adj.adjusted_qty + ' × ' +
-                    frappe.format_currency(adj.adjusted_rate) + ' ' +
+                    adj.adjusted_rate + ' ' +
                     frappe.utils.escape_html(adj.bulk_uom) + '</strong>' +
                 '</span>' +
                 '<span class="text-muted" style="font-size:0.85em;">(' +
