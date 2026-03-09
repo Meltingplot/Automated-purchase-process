@@ -383,6 +383,21 @@ function _render_match_badges(wrapper, matches) {
     var items = matches.items || [];
     items.forEach(function (info, idx) {
         var $cell = wrapper.find('.item-match-cell[data-idx="' + idx + '"]');
+
+        // Set resolved UOM on both UOM and Stock UOM controls
+        if (info.resolved_uom) {
+            var $uom_link = wrapper.find('.uom-link-control[data-idx="' + idx + '"]');
+            var uom_control = $uom_link.data("control");
+            if (uom_control) {
+                uom_control.set_value(info.resolved_uom);
+            }
+            var $stock_uom = wrapper.find('.stock-uom-control[data-idx="' + idx + '"]');
+            var stock_uom_control = $stock_uom.data("control");
+            if (stock_uom_control) {
+                stock_uom_control.set_value(info.resolved_uom);
+            }
+        }
+
         if (info.exists) {
             $cell.html(
                 '<a href="/app/item/' +
@@ -411,23 +426,26 @@ function _render_match_badges(wrapper, matches) {
         if (info.uom_adjustment) {
             var adj = info.uom_adjustment;
             var $row = wrapper.find('tr[data-item-idx="' + idx + '"]');
-            // Update qty, rate fields with adjusted values
-            $row.find('.review-item-field[data-field="quantity"]').val(adj.adjusted_qty);
-            $row.find('.review-item-field[data-field="unit_price"]').val(adj.adjusted_rate);
-            // Update UOM Link control with bulk UOM
-            var $uom_link = wrapper.find('.uom-link-control[data-idx="' + idx + '"]');
-            var uom_control = $uom_link.data("control");
-            if (uom_control) {
-                uom_control.set_value(adj.bulk_uom);
+
+            // Only update qty/rate/uom inputs if the adjusted UOM exists
+            // (auto-created UOMs from divisor computation don't exist yet)
+            if (adj.uom_exists) {
+                $row.find('.review-item-field[data-field="quantity"]').val(adj.adjusted_qty);
+                $row.find('.review-item-field[data-field="unit_price"]').val(adj.adjusted_rate);
+                var $uom_adj = wrapper.find('.uom-link-control[data-idx="' + idx + '"]');
+                var uom_adj_control = $uom_adj.data("control");
+                if (uom_adj_control) {
+                    uom_adj_control.set_value(adj.bulk_uom);
+                }
             }
 
             // Show prominent conversion banner below the row
             var $conversion_row = $(
                 '<tr class="uom-conversion-row" style="background:var(--subtle-fg);">' +
-                '<td colspan="' + (_ITEM_FIELDS.length + 3) + '" style="padding:4px 12px;">' +
+                '<td colspan="' + (_ITEM_FIELDS.length + 4) + '" style="padding:4px 12px;">' +
                 '<div style="display:flex;align-items:center;gap:8px;font-size:0.85em;">' +
                 '<span class="badge" style="background:#805ad5;color:#fff;font-size:0.8em;">' +
-                    __("UOM Converted") + '</span>' +
+                    (adj.uom_exists ? __("UOM Converted") : __("UOM will be created")) + '</span>' +
                 '<span style="color:var(--text-muted);">' +
                     __("Invoice") + ': ' +
                     '<strong>' + adj.original_qty + ' × ' +

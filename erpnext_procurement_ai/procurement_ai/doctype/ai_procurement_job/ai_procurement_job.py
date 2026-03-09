@@ -121,15 +121,17 @@ class AIProcurementJob(Document):
         items_info = []
         for item in clean.get("items", []):
             matched = _try_resolve_item(item, settings, supplier_name)
-            info = {
-                "item_code": matched if matched else None,
-                "exists": bool(matched),
-            }
-
-            # Check if bulk UOM adjustment would apply
             qty = float(item.get("quantity", 1) or 1)
             rate = _true_unit_price(item, qty)
             uom = _resolve_uom(item.get("uom", "Nos"))
+
+            info = {
+                "item_code": matched if matched else None,
+                "exists": bool(matched),
+                "resolved_uom": uom,
+            }
+
+            # Check if bulk UOM adjustment would apply
             adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(
                 qty, rate, uom, item_code=matched, currency=invoice_currency,
                 dry_run=True,
@@ -142,6 +144,7 @@ class AIProcurementJob(Document):
                     "adjusted_qty": adj_qty,
                     "original_rate": rate,
                     "adjusted_rate": adj_rate,
+                    "uom_exists": bool(frappe.db.exists("UOM", adj_uom)),
                 }
 
             items_info.append(info)
