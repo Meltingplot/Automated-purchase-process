@@ -95,10 +95,7 @@ def create_purchase_order(
     if order_ref:
         po_data["order_confirmation_no"] = order_ref
 
-    # Add tax charges from extracted data
-    taxes = _build_taxes(extracted_data, settings)
-    if taxes:
-        po_data["taxes"] = taxes
+    # Taxes are only added to Purchase Invoice, not PO/PR
 
     po = frappe.get_doc(po_data)
     po.insert(ignore_permissions=True)
