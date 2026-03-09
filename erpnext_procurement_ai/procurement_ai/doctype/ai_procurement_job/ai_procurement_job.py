@@ -113,7 +113,7 @@ class AIProcurementJob(Document):
             qty = float(item.get("quantity", 1) or 1)
             rate = float(item.get("unit_price", 0) or 0)
             uom = _resolve_uom(item.get("uom", "Nos"))
-            adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(qty, rate, uom)
+            adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(qty, rate, uom, item_code=matched)
             if adj_uom != uom:
                 info["uom_adjustment"] = {
                     "original_uom": uom,

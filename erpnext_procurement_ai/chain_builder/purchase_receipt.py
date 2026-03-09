@@ -92,7 +92,7 @@ def _build_receipt_items(
         qty = float(item.get("quantity", 1))
         rate = float(item.get("unit_price", 0))
         uom = _resolve_uom(item.get("uom", "Nos"))
-        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom)
+        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom, item_code=item_code)
 
         receipt_item = {
             "item_code": item_code,

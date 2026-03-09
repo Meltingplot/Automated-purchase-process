@@ -129,7 +129,7 @@ def _build_items(
         uom = _resolve_uom(item.get("uom", "Nos"))
 
         # Adjust for very small unit prices (e.g. 1000 resistors at 0.0002 EUR)
-        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom)
+        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom, item_code=item_code)
 
         items.append(
             {
@@ -261,17 +261,24 @@ _MIN_RATE_THRESHOLD = 0.01
 
 
 def _adjust_bulk_uom(
-    qty: float, rate: float, uom: str
+    qty: float, rate: float, uom: str, item_code: str | None = None
 ) -> tuple[float, float, str]:
     """
     Adjust qty/rate/uom when the per-piece price is too small for Item Price.
 
-    If rate < threshold, look for a UOM in ERPNext's UOM Conversion Factor
-    table that converts from a bulk UOM to the current UOM with a suitable
-    factor (e.g. UOM "100" → "Nos" factor 100). Then:
+    ERPNext requires UOM conversions to be registered on the specific Item's
+    ``uoms`` child table. So we check in order:
+
+    1. Item-specific conversions (``UOM Conversion Detail`` child of Item)
+    2. Global ``UOM Conversion Factor`` table (fallback)
+
+    If a suitable bulk UOM is found:
       new_qty  = qty / factor
       new_rate = rate * factor
       new_uom  = bulk_uom
+
+    If the conversion came from the global table and the item exists, the
+    conversion is registered on the item so ERPNext accepts it on transactions.
 
     Only applies to piece-type UOMs (Nos) where bulk packaging makes sense.
     """
@@ -282,8 +289,26 @@ def _adjust_bulk_uom(
     if uom not in ("Nos", "Stk", "Stück", "pcs"):
         return qty, rate, uom
 
-    # Find bulk UOMs that convert to current UOM, sorted by smallest factor
-    # that brings the rate above the threshold.
+    # Step 1: Check item-specific UOM conversions
+    if item_code and frappe.db.exists("Item", item_code):
+        item_uoms = frappe.get_all(
+            "UOM Conversion Detail",
+            filters={"parent": item_code, "parenttype": "Item", "conversion_factor": [">", 1]},
+            fields=["uom", "conversion_factor"],
+            order_by="conversion_factor asc",
+        )
+        for row in item_uoms:
+            factor = float(row["conversion_factor"])
+            adjusted_rate = rate * factor
+            if adjusted_rate >= _MIN_RATE_THRESHOLD and qty / factor >= 1:
+                logger.info(
+                    f"Bulk UOM adjustment (item {item_code}): {qty} x {rate} {uom} "
+                    f"-> {qty / factor} x {adjusted_rate} {row['uom']} "
+                    f"(factor {factor})"
+                )
+                return qty / factor, adjusted_rate, row["uom"]
+
+    # Step 2: Fall back to global UOM Conversion Factor table
     bulk_uoms = frappe.get_all(
         "UOM Conversion Factor",
         filters={"to_uom": uom, "value": [">", 1]},
@@ -295,14 +320,39 @@ def _adjust_bulk_uom(
         factor = float(row["value"])
         adjusted_rate = rate * factor
         if adjusted_rate >= _MIN_RATE_THRESHOLD and qty / factor >= 1:
+            # Register this conversion on the item so ERPNext accepts it
+            if item_code:
+                _ensure_item_uom(item_code, row["from_uom"], factor)
             logger.info(
-                f"Bulk UOM adjustment: {qty} x {rate} {uom} "
+                f"Bulk UOM adjustment (global): {qty} x {rate} {uom} "
                 f"-> {qty / factor} x {adjusted_rate} {row['from_uom']} "
                 f"(factor {factor})"
             )
             return qty / factor, adjusted_rate, row["from_uom"]
 
     return qty, rate, uom
+
+
+def _ensure_item_uom(item_code: str, uom: str, conversion_factor: float):
+    """Register a UOM conversion on an Item if not already present."""
+    if not frappe.db.exists("Item", item_code):
+        return
+
+    existing = frappe.get_all(
+        "UOM Conversion Detail",
+        filters={"parent": item_code, "parenttype": "Item", "uom": uom},
+        fields=["name"],
+        limit=1,
+    )
+    if existing:
+        return
+
+    item_doc = frappe.get_doc("Item", item_code)
+    item_doc.append("uoms", {"uom": uom, "conversion_factor": conversion_factor})
+    item_doc.save(ignore_permissions=True)
+    logger.info(
+        f"Registered UOM '{uom}' (factor {conversion_factor}) on Item {item_code}"
+    )
 
 
 def _get_default_item_group() -> str:
