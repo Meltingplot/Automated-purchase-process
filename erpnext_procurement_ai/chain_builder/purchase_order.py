@@ -517,7 +517,11 @@ def _adjust_bulk_uom(
         factor = float(name)
         if factor > 1:
             candidates.append((name, factor))
-    candidates.sort(key=lambda x: x[1])
+    int_qty = int(qty) if qty == int(qty) else 0
+    candidates.sort(key=lambda x: (
+        0 if _is_power_of_10(int(x[1])) else (1 if int(x[1]) == int_qty and int_qty > 1 else 2),
+        x[1],
+    ))
 
     for uom_name, factor in candidates:
         adjusted_rate = rate * factor
@@ -559,15 +563,38 @@ def _adjust_bulk_uom(
     return qty, rate, uom
 
 
+def _is_power_of_10(n: int) -> bool:
+    """Check if n is a power of 10 (10, 100, 1000, ...)."""
+    if n <= 0:
+        return False
+    while n > 1:
+        if n % 10 != 0:
+            return False
+        n //= 10
+    return True
+
+
 def _divisors(n: int) -> list[int]:
-    """Return sorted list of divisors of n (excluding 1)."""
+    """Return divisors of n (excluding 1), ordered by preference.
+
+    Preference: powers of 10 ascending, then n itself (qty=1),
+    then remaining divisors ascending.
+    """
     divs = set()
     for i in range(2, int(n**0.5) + 1):
         if n % i == 0:
             divs.add(i)
             divs.add(n // i)
     divs.add(n)
-    return sorted(divs)
+
+    def _sort_key(d):
+        if _is_power_of_10(d):
+            return (0, d)      # powers of 10, ascending
+        if d == n:
+            return (1, 0)      # qty itself (gives qty=1), before other divisors
+        return (2, d)          # remaining divisors, ascending
+
+    return sorted(divs, key=_sort_key)
 
 
 def _ensure_uom_exists(uom_name: str):
