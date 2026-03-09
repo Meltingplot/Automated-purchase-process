@@ -22,6 +22,7 @@ def create_purchase_invoice(
     po_item_links: dict | None = None,
     pr_item_links: dict | None = None,
     item_mapping: dict | None = None,
+    stock_uom_mapping: dict | None = None,
 ) -> str:
     """
     Create a Purchase Invoice from extracted document data.
@@ -48,6 +49,7 @@ def create_purchase_invoice(
         po_item_links,
         pr_item_links,
         item_mapping=item_mapping,
+        stock_uom_mapping=stock_uom_mapping,
     )
     if not items:
         frappe.throw("Cannot create Purchase Invoice without line items")
@@ -111,6 +113,7 @@ def _build_invoice_items(
     po_item_links: dict | None = None,
     pr_item_links: dict | None = None,
     item_mapping: dict | None = None,
+    stock_uom_mapping: dict | None = None,
 ) -> list[dict]:
     """Build invoice items, optionally linked to PO and receipt with item-level links."""
     company = settings.get("default_company")
@@ -125,7 +128,8 @@ def _build_invoice_items(
 
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
-        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
+        stock_uom = stock_uom_mapping.get(idx) if stock_uom_mapping else None
+        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
         uom = _resolve_uom(item.get("uom", "Nos"))

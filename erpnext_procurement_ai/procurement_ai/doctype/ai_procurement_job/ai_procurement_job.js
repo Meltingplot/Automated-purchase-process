@@ -242,7 +242,8 @@ function _render_review_form(frm) {
         });
         html +=
             "<th>" + __("Existing Match") + "</th>" +
-            "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
+            "<th>" + __("Map to Item") + "</th>" +
+            "<th>" + __("Stock UOM") + "</th></tr></thead><tbody>";
 
         items.forEach(function (item, idx) {
             html += '<tr data-item-idx="' + idx + '">';
@@ -274,6 +275,11 @@ function _render_review_form(frm) {
                 '<span class="text-muted">' + __("Checking...") + "</span></td>";
             html +=
                 '<td><div class="item-link-control" data-idx="' + idx + '"></div></td>';
+            // Stock UOM — used when creating a new item
+            var item_uom = item["uom"] || "Nos";
+            html +=
+                '<td><div class="stock-uom-control" data-idx="' + idx + '"' +
+                ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"></div></td>';
             html += "</tr>";
         });
         html += "</tbody></table></div>";
@@ -315,6 +321,26 @@ function _render_review_form(frm) {
                 fieldtype: "Link",
                 fieldname: "uom_" + idx,
                 options: "UOM",
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        control.set_value(initial_val);
+        $el.data("control", control);
+    });
+
+    // Create Frappe Link controls for Stock UOM fields
+    wrapper.find(".stock-uom-control").each(function () {
+        var $el = $(this);
+        var idx = $el.data("idx");
+        var initial_val = $el.data("initial-value") || "Nos";
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "stock_uom_" + idx,
+                options: "UOM",
+                placeholder: __("Stock UOM"),
             },
             parent: $el,
             render_input: true,
@@ -630,9 +656,20 @@ function _collect_and_approve(frm) {
         item_mapping[idx] = val || null;
     });
 
-    // Save reviewed data and item mapping to the doc, then call approve
+    // Collect stock UOM mapping (for new item creation)
+    var stock_uom_mapping = {};
+    wrapper.find(".stock-uom-control").each(function () {
+        var $el = $(this);
+        var idx = $el.data("idx");
+        var control = $el.data("control");
+        var val = control ? control.get_value() : null;
+        stock_uom_mapping[idx] = val || null;
+    });
+
+    // Save reviewed data, item mapping, and stock UOM mapping to the doc
     frm.set_value("reviewed_data", JSON.stringify(reviewed));
     frm.set_value("item_mapping", JSON.stringify(item_mapping));
+    frm.set_value("stock_uom_mapping", JSON.stringify(stock_uom_mapping));
     frm.save().then(function () {
         frm.call("approve_and_create").then(function () {
             frm.reload_doc();

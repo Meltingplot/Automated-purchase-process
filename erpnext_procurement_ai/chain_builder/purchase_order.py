@@ -54,6 +54,7 @@ def create_purchase_order(
     settings: dict,
     job_name: str,
     item_mapping: dict | None = None,
+    stock_uom_mapping: dict | None = None,
 ) -> str:
     """
     Create a Purchase Order from extracted document data.
@@ -67,7 +68,7 @@ def create_purchase_order(
     Returns:
         Purchase Order name
     """
-    items = _build_items(extracted_data, settings, supplier, item_mapping=item_mapping)
+    items = _build_items(extracted_data, settings, supplier, item_mapping=item_mapping, stock_uom_mapping=stock_uom_mapping)
     if not items:
         frappe.throw("Cannot create Purchase Order without line items")
 
@@ -120,6 +121,7 @@ def _build_items(
     settings: dict,
     supplier: str = "",
     item_mapping: dict | None = None,
+    stock_uom_mapping: dict | None = None,
 ) -> list[dict]:
     """Build PO items list from extracted line items."""
     items = []
@@ -128,7 +130,8 @@ def _build_items(
 
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
-        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
+        stock_uom = stock_uom_mapping.get(idx) if stock_uom_mapping else None
+        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
         uom = _resolve_uom(item.get("uom", "Nos"))
@@ -711,7 +714,7 @@ def _try_resolve_item(item: dict, settings: dict, supplier: str = "") -> str | N
     return None
 
 
-def _resolve_item(item: dict, settings: dict, supplier: str = "") -> str:
+def _resolve_item(item: dict, settings: dict, supplier: str = "", stock_uom: str | None = None) -> str:
     """
     Find or create an ERPNext Item matching the extracted item.
 
@@ -732,7 +735,7 @@ def _resolve_item(item: dict, settings: dict, supplier: str = "") -> str:
         return match
 
     # Step 4: Create new item
-    return _create_item(item, supplier, settings)
+    return _create_item(item, supplier, settings, stock_uom=stock_uom)
 
 
 def _match_by_supplier_part_no(supplier: str, supplier_part_no: str) -> str | None:
@@ -901,12 +904,21 @@ def _extract_keywords(item_name: str, description: str) -> list[str]:
     return sorted(unique, key=len, reverse=True)
 
 
-def _create_item(item: dict, supplier: str, settings: dict) -> str:
-    """Create a new ERPNext Item and optionally link it to the supplier."""
+def _create_item(item: dict, supplier: str, settings: dict, stock_uom: str | None = None) -> str:
+    """Create a new ERPNext Item and optionally link it to the supplier.
+
+    Args:
+        stock_uom: Optional stock/warehouse UOM override. When set, the
+                   item is created with this as ``stock_uom`` instead of
+                   the resolved transaction UOM. ERPNext then handles
+                   conversion from the transaction UOM automatically.
+    """
     item_name = _sanitize_text(item.get("item_name", "Unknown Item"), max_len=140)
     item_desc = _sanitize_text(item.get("description", item_name), max_len=500)
     item_code = _sanitize_code(item.get("item_code", ""))
     uom = _resolve_uom(item.get("uom", "Nos"))
+    # Use user-specified stock UOM if provided, otherwise default to transaction UOM
+    effective_stock_uom = _resolve_uom(stock_uom) if stock_uom else uom
 
     # item_code is mandatory in ERPNext. Generate a unique SKU to avoid
     # collisions — neither the supplier's part number nor item_name are
@@ -919,7 +931,7 @@ def _create_item(item: dict, supplier: str, settings: dict) -> str:
             "item_code": generated_sku,
             "item_name": item_name,
             "item_group": _get_default_item_group(),
-            "stock_uom": uom,
+            "stock_uom": effective_stock_uom,
             "is_stock_item": 0,
             "delivered_by_supplier": 1 if supplier else 0,
             "description": item_desc,

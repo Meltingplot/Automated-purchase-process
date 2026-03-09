@@ -22,6 +22,7 @@
         "review_html",
         "reviewed_data",
         "item_mapping",
+        "stock_uom_mapping",
         "section_break_created",
         "created_supplier",
         "created_po",
@@ -141,6 +142,12 @@
             "fieldtype": "JSON",
             "hidden": 1,
             "label": "Item Mapping"
+        },
+        {
+            "fieldname": "stock_uom_mapping",
+            "fieldtype": "JSON",
+            "hidden": 1,
+            "label": "Stock UOM Mapping"
         },
         {
             "fieldname": "section_break_created",

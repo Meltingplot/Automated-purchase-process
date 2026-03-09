@@ -344,6 +344,17 @@ def run_chain_from_review(procurement_job_name: str):
             if not item_mapping:
                 item_mapping = None
 
+        # Parse stock_uom_mapping (JSON: {"0": "mm", "1": null, ...})
+        stock_uom_mapping = None
+        if job.stock_uom_mapping:
+            raw_suom = json.loads(job.stock_uom_mapping)
+            stock_uom_mapping = {
+                int(k): v for k, v in raw_suom.items()
+                if v
+            }
+            if not stock_uom_mapping:
+                stock_uom_mapping = None
+
         source_type = job.detected_type or "Invoice"
         source_file_url = job.source_document_url or job.source_document
 
@@ -357,6 +368,7 @@ def run_chain_from_review(procurement_job_name: str):
             settings=settings,
             job_name=job_name,
             item_mapping=item_mapping,
+            stock_uom_mapping=stock_uom_mapping,
         )
 
         _complete_job(job, None, consensus_data, source_type, created)

@@ -20,6 +20,7 @@ def create_purchase_receipt(
     purchase_order: str | None = None,
     po_item_links: dict | None = None,
     item_mapping: dict | None = None,
+    stock_uom_mapping: dict | None = None,
 ) -> str:
     """
     Create a Purchase Receipt from extracted document data.
@@ -39,6 +40,7 @@ def create_purchase_receipt(
     items = _build_receipt_items(
         extracted_data, settings, supplier, purchase_order, po_item_links,
         item_mapping=item_mapping,
+        stock_uom_mapping=stock_uom_mapping,
     )
     if not items:
         frappe.throw("Cannot create Purchase Receipt without line items")
@@ -90,6 +92,7 @@ def _build_receipt_items(
     purchase_order: str | None,
     po_item_links: dict | None = None,
     item_mapping: dict | None = None,
+    stock_uom_mapping: dict | None = None,
 ) -> list[dict]:
     """Build receipt items, optionally linked to a PO with item-level links."""
     company = settings.get("default_company")
@@ -104,7 +107,8 @@ def _build_receipt_items(
 
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
-        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
+        stock_uom = stock_uom_mapping.get(idx) if stock_uom_mapping else None
+        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
         uom = _resolve_uom(item.get("uom", "Nos"))

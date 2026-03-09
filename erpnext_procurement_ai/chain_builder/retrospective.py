@@ -58,6 +58,7 @@ class RetrospectiveChainBuilder:
         settings: dict,
         job_name: str,
         item_mapping: dict | None = None,
+        stock_uom_mapping: dict | None = None,
     ) -> dict:
         """
         Find or create the full document chain from extracted data.
@@ -130,6 +131,7 @@ class RetrospectiveChainBuilder:
                     settings=settings,
                     job_name=job_name,
                     item_mapping=item_mapping,
+                    stock_uom_mapping=stock_uom_mapping,
                 )
                 result["purchase_order"] = po_name
                 result["purchase_order_matched"] = False
@@ -170,6 +172,7 @@ class RetrospectiveChainBuilder:
                     purchase_order=result.get("purchase_order"),
                     po_item_links=po_item_links,
                     item_mapping=item_mapping,
+                    stock_uom_mapping=stock_uom_mapping,
                 )
                 result["purchase_receipt"] = pr_name
                 result["purchase_receipt_matched"] = False
@@ -212,6 +215,7 @@ class RetrospectiveChainBuilder:
                     po_item_links=po_item_links,
                     pr_item_links=pr_item_links,
                     item_mapping=item_mapping,
+                    stock_uom_mapping=stock_uom_mapping,
                 )
                 result["purchase_invoice"] = pi_name
                 result["purchase_invoice_matched"] = False
