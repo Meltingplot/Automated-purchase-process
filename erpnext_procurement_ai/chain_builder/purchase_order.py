@@ -184,25 +184,8 @@ def _build_shipping_charges(extracted_data: dict, settings: dict) -> list[dict]:
 
 
 def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
-    """Build Purchase Taxes and Charges for PI (shipping + VAT)."""
-    # Collect tax rates from items
-    tax_rates = set()
-    for item in extracted_data.get("items", []):
-        rate = item.get("tax_rate")
-        if rate is not None:
-            try:
-                tax_rates.add(float(rate))
-            except (TypeError, ValueError):
-                pass
-
-    if not tax_rates:
-        return []
-
+    """Build Purchase Taxes and Charges (shipping + VAT)."""
     company = settings.get("default_company")
-    tax_account = _get_tax_account(company)
-    if not tax_account:
-        return []
-
     taxes = []
 
     # Shipping first (Actual amount), so VAT can reference it
@@ -227,21 +210,34 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
                 )
                 has_shipping = True
 
+    # Collect tax rates from items
+    tax_rates = set()
+    for item in extracted_data.get("items", []):
+        rate = item.get("tax_rate")
+        if rate is not None:
+            try:
+                tax_rates.add(float(rate))
+            except (TypeError, ValueError):
+                pass
+
     # VAT rows — "On Previous Row Total" if shipping exists, else "On Net Total"
-    for rate in sorted(tax_rates):
-        if rate <= 0:
-            continue
-        tax_row = {
-            "account_head": tax_account,
-            "rate": rate,
-            "description": f"VAT {rate:.1f}%",
-        }
-        if has_shipping:
-            tax_row["charge_type"] = "On Previous Row Total"
-            tax_row["row_id"] = len(taxes)  # references the shipping row
-        else:
-            tax_row["charge_type"] = "On Net Total"
-        taxes.append(tax_row)
+    if tax_rates:
+        tax_account = _get_tax_account(company)
+        if tax_account:
+            for rate in sorted(tax_rates):
+                if rate <= 0:
+                    continue
+                tax_row = {
+                    "account_head": tax_account,
+                    "rate": rate,
+                    "description": f"VAT {rate:.1f}%",
+                }
+                if has_shipping:
+                    tax_row["charge_type"] = "On Previous Row Total"
+                    tax_row["row_id"] = len(taxes)  # references the shipping row
+                else:
+                    tax_row["charge_type"] = "On Net Total"
+                taxes.append(tax_row)
 
     return taxes
 
