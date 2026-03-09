@@ -938,7 +938,7 @@ def _create_item(item: dict, supplier: str, settings: dict, stock_uom: str | Non
             "item_name": item_name,
             "item_group": _get_default_item_group(),
             "stock_uom": effective_stock_uom,
-            "is_stock_item": 0,
+            "is_stock_item": 0 if item.get("item_type") == "service" else 1,
             "delivered_by_supplier": 1 if supplier else 0,
             "description": item_desc,
         }

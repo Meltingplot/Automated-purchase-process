@@ -39,6 +39,7 @@ RULES:
 7. Any deviation from the schema will be treated as an error.
 8. All monetary amounts (unit_price, total_price, subtotal, total_amount, shipping_cost) MUST be NET amounts (before tax / Netto / ohne MwSt). Extract the tax rate per item in tax_rate.
 9. subtotal = sum of all item total_price values. total_amount = subtotal + tax_amount + shipping_cost.
+10. For each item, set item_type to "stock" for physical/tangible goods or "service" for services, fees, shipping, licenses, consulting, installation, etc.
 
 You MUST respond in the following JSON format:
 {schema}"""
@@ -93,12 +94,23 @@ FEW_SHOT_EXAMPLE = '''{
       "uom": "Stk",
       "unit_price": 0.15,
       "total_price": 15.00,
-      "tax_rate": 19.0
+      "tax_rate": 19.0,
+      "item_type": "stock"
+    },
+    {
+      "position": 2,
+      "item_name": "Versandkosten",
+      "quantity": 1,
+      "uom": "Stk",
+      "unit_price": 5.90,
+      "total_price": 5.90,
+      "tax_rate": 19.0,
+      "item_type": "service"
     }
   ],
-  "subtotal": 15.00,
-  "tax_amount": 2.85,
-  "total_amount": 17.85,
+  "subtotal": 20.90,
+  "tax_amount": 3.97,
+  "total_amount": 24.87,
   "confidence_self_assessment": 0.9
 }'''
 
@@ -128,7 +140,7 @@ Schema fields:
 - delivery_date: Expected delivery date (optional)
 - payment_terms: Payment terms text (optional)
 - currency: Currency code, default "EUR"
-- items: List of line items, each with: item_name, quantity, uom, unit_price, total_price, tax_rate
+- items: List of line items, each with: item_name, quantity, uom, unit_price, total_price, tax_rate, item_type ("stock" or "service")
 - subtotal: Net total before tax (optional)
 - tax_amount: Total tax (optional)
 - total_amount: Grand total including tax (optional)

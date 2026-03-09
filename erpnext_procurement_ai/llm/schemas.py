@@ -25,6 +25,10 @@ class LineItem(BaseModel):
     total_price: Decimal
     tax_rate: Decimal | None = None
     discount_percent: Decimal | None = None
+    item_type: str | None = Field(
+        default=None,
+        description='Item type: "stock" for physical goods, "service" for services/fees',
+    )
 
 
 class ExtractedDocument(BaseModel):
