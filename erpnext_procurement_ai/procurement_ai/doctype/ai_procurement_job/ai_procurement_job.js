@@ -808,9 +808,6 @@ function _set_stock_uom_readonly(wrapper, idx, stock_uom) {
         control.$input.prop("disabled", true);
         control.$input.css("background", "var(--subtle-fg)");
     }
-    // Also disable the factor input — existing items have their own conversions
-    wrapper.find('.review-item-field[data-idx="' + idx + '"][data-field="uom_conversion_factor"]')
-        .prop("disabled", true).css("background", "var(--subtle-fg)");
 }
 
 function _set_stock_uom_editable(wrapper, idx) {
@@ -820,8 +817,6 @@ function _set_stock_uom_editable(wrapper, idx) {
         control.$input.prop("disabled", false);
         control.$input.css("background", "");
     }
-    wrapper.find('.review-item-field[data-idx="' + idx + '"][data-field="uom_conversion_factor"]')
-        .prop("disabled", false).css("background", "");
 }
 
 function _update_progress(frm, stage) {
