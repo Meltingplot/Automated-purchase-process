@@ -336,8 +336,19 @@ def _adjust_bulk_uom(
         return qty, rate, uom
 
     # Only adjust piece-type UOMs — bulk packaging doesn't apply to kg/m/etc.
-    if uom not in ("Nos", "Stk", "Stück", "pcs"):
+    _PIECE_UOMS = {"Nos", "Stk", "Stück", "pcs"}
+    if uom not in _PIECE_UOMS:
         return qty, rate, uom
+
+    # Build list of equivalent UOM names to check conversion factors against
+    # (user may have set up "Stk" -> "10" instead of "Nos" -> "10")
+    uom_aliases = {uom}
+    for alias, target in _UOM_MAP.items():
+        if target == "Nos":
+            # Add the alias if it exists as a UOM in ERPNext
+            uom_aliases.add(alias.capitalize())
+            uom_aliases.add(alias)
+    uom_aliases.update(_PIECE_UOMS)
 
     # Step 1: Check item-specific UOM conversions (only numeric UOM names)
     if item_code and frappe.db.exists("Item", item_code):
@@ -363,7 +374,7 @@ def _adjust_bulk_uom(
     # Step 2a: Check global UOM Conversion Factor table
     bulk_uoms = frappe.get_all(
         "UOM Conversion Factor",
-        filters={"to_uom": uom, "value": [">", 1]},
+        filters={"to_uom": ["in", list(uom_aliases)], "value": [">", 1]},
         fields=["from_uom", "value"],
         order_by="value asc",
     )
