@@ -9,7 +9,7 @@ import math
 import re
 
 import frappe
-from frappe.utils import today
+from frappe.utils import flt, round_based_on_smallest_currency_fraction, today
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +376,7 @@ def _adjust_bulk_uom(
                     f"-> {qty / factor} x {adjusted_rate} {row['uom']} "
                     f"(factor {factor})"
                 )
-                return qty / factor, adjusted_rate, row["uom"]
+                return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), row["uom"]
 
     # Step 2a: Check global UOM Conversion Factor table
     bulk_uoms = frappe.get_all(
@@ -398,7 +398,7 @@ def _adjust_bulk_uom(
                 f"-> {qty / factor} x {adjusted_rate} {row['from_uom']} "
                 f"(factor {factor})"
             )
-            return qty / factor, adjusted_rate, row["from_uom"]
+            return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), row["from_uom"]
 
     # Step 2b: Scan for numeric UOMs without conversion factors yet
     # (e.g. UOM "100" exists but no UOM Conversion Factor "100" -> "Nos")
@@ -426,7 +426,7 @@ def _adjust_bulk_uom(
                 f"-> {qty / factor} x {adjusted_rate} {uom_name} "
                 f"(factor {factor}, conversion factor created)"
             )
-            return qty / factor, adjusted_rate, uom_name
+            return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), uom_name
 
     return qty, rate, uom
 
