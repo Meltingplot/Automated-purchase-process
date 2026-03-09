@@ -63,6 +63,19 @@ class AIProcurementJob(Document):
         frappe.msgprint(f"Creating documents for {self.name}", alert=True)
 
     @frappe.whitelist()
+    def mark_completed(self):
+        """Mark the job as completed after user has verified created documents."""
+        if self.status != "Needs Review":
+            frappe.throw(
+                f"Cannot mark job as completed in status '{self.status}'. "
+                "Only jobs in 'Needs Review' can be marked completed."
+            )
+
+        self.status = "Completed"
+        self.save()
+        frappe.msgprint(f"Job {self.name} marked as completed", alert=True)
+
+    @frappe.whitelist()
     def check_review_matches(self):
         """Check which supplier/items already exist vs. would be created.
 

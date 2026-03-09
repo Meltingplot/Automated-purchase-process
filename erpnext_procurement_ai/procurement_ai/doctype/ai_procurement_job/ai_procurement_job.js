@@ -45,27 +45,49 @@ frappe.ui.form.on("AI Procurement Job", {
             );
         }
 
-        // Approve button for Needs Review jobs (escalation)
+        // Needs Review: post-creation verification or escalation
         if (frm.doc.status === "Needs Review") {
-            frm.add_custom_button(
-                __("Approve & Create"),
-                function () {
-                    frappe.confirm(
-                        __(
-                            "This will create the procurement documents from the extracted data. Continue?"
-                        ),
-                        function () {
-                            frm.call({
-                                method: "process_document",
-                                callback: function () {
+            var has_created_docs = frm.doc.created_po || frm.doc.created_receipt || frm.doc.created_invoice;
+
+            if (has_created_docs) {
+                // Post-creation verification — user checks amounts match
+                frm.add_custom_button(
+                    __("Mark as Completed"),
+                    function () {
+                        frappe.confirm(
+                            __(
+                                "Have you verified the created documents and amounts are correct?"
+                            ),
+                            function () {
+                                frm.call("mark_completed").then(function () {
                                     frm.reload_doc();
-                                },
-                            });
-                        }
-                    );
-                },
-                __("Review")
-            );
+                                });
+                            }
+                        );
+                    }
+                ).addClass("btn-primary");
+            } else {
+                // Escalation — no docs created yet
+                frm.add_custom_button(
+                    __("Approve & Create"),
+                    function () {
+                        frappe.confirm(
+                            __(
+                                "This will create the procurement documents from the extracted data. Continue?"
+                            ),
+                            function () {
+                                frm.call({
+                                    method: "process_document",
+                                    callback: function () {
+                                        frm.reload_doc();
+                                    },
+                                });
+                            }
+                        );
+                    },
+                    __("Review")
+                );
+            }
 
             frm.add_custom_button(
                 __("Reject"),
@@ -563,7 +585,7 @@ function _render_status_badge(frm) {
 }
 
 function _render_created_docs(frm) {
-    if (frm.doc.status !== "Completed") return;
+    if (frm.doc.status !== "Completed" && frm.doc.status !== "Needs Review") return;
 
     var html = '<div class="created-docs-summary">';
     if (frm.doc.created_supplier) {

@@ -15,6 +15,7 @@
         "max_parallel_llms",
         "auto_submit_documents",
         "require_document_review",
+        "amount_tolerance",
         "escalation_email",
         "cloud_llm_section",
         "claude_api_key",
@@ -105,6 +106,13 @@
             "fieldtype": "Check",
             "label": "Require Document Review",
             "description": "Show extracted data for human review before creating documents"
+        },
+        {
+            "default": "0.05",
+            "fieldname": "amount_tolerance",
+            "fieldtype": "Currency",
+            "label": "Amount Tolerance",
+            "description": "Max allowed difference between extracted and created document totals. If exceeded, job stays in 'Needs Review' instead of auto-completing. Set to 0 to always require review."
         },
         {
             "fieldname": "escalation_email",

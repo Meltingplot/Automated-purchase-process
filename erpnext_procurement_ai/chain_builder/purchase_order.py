@@ -173,20 +173,10 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
         return []
 
     taxes = []
-    for rate in sorted(tax_rates):
-        if rate <= 0:
-            continue
-        taxes.append(
-            {
-                "charge_type": "On Net Total",
-                "account_head": tax_account,
-                "rate": rate,
-                "description": f"VAT {rate:.1f}%",
-            }
-        )
 
-    # Add shipping cost as an "Actual" charge
+    # Shipping first (Actual amount), so VAT can reference it
     shipping = extracted_data.get("shipping_cost")
+    has_shipping = False
     if shipping:
         try:
             shipping_amount = float(shipping)
@@ -204,6 +194,23 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
                         "add_deduct_tax": "Add",
                     }
                 )
+                has_shipping = True
+
+    # VAT rows — "On Previous Row Total" if shipping exists, else "On Net Total"
+    for rate in sorted(tax_rates):
+        if rate <= 0:
+            continue
+        tax_row = {
+            "account_head": tax_account,
+            "rate": rate,
+            "description": f"VAT {rate:.1f}%",
+        }
+        if has_shipping:
+            tax_row["charge_type"] = "On Previous Row Total"
+            tax_row["row_id"] = len(taxes)  # references the shipping row
+        else:
+            tax_row["charge_type"] = "On Net Total"
+        taxes.append(tax_row)
 
     return taxes
 

@@ -46,6 +46,7 @@ class AIProcurementSettings(Document):
             "max_parallel_llms": self.max_parallel_llms,
             "auto_submit_documents": self.auto_submit_documents,
             "require_document_review": self.require_document_review,
+            "amount_tolerance": float(self.amount_tolerance or 0.05),
             "escalation_email": self.escalation_email,
             "claude_api_key": self.get_password("claude_api_key", raise_exception=False),
             "openai_api_key": self.get_password("openai_api_key", raise_exception=False),

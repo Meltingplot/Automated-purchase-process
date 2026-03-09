@@ -248,7 +248,11 @@ def run_extraction_pipeline(procurement_job_name: str):
 
 
 def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, source_type: str, created: dict):
-    """Update job with final results and auto-resolve any open escalations."""
+    """Update job with created docs, verify amounts, and set final status.
+
+    Auto-completes if amounts are within the configured tolerance.
+    Stays in 'Needs Review' if amounts differ beyond tolerance.
+    """
     job_name = job.name
     confidence = 0.0
     if pipeline_result:
@@ -256,7 +260,6 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
     elif job.confidence_score:
         confidence = float(job.confidence_score)
 
-    job.status = "Completed"
     job.confidence_score = confidence
     job.consensus_data = json.dumps(consensus_data)
     job.detected_type = _validate_source_type(source_type)
@@ -264,8 +267,25 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
     job.created_po = created.get("purchase_order")
     job.created_receipt = created.get("purchase_receipt")
     job.created_invoice = created.get("purchase_invoice")
+
+    # Verify amounts against created documents
+    settings_doc = frappe.get_single("AI Procurement Settings")
+    tolerance = float(settings_doc.amount_tolerance or 0.05)
+    has_mismatch, verification = _verify_amounts(consensus_data, created, tolerance)
+
+    if has_mismatch:
+        job.status = "Needs Review"
+        stage = "needs_review"
+    else:
+        job.status = "Completed"
+        stage = "completed"
+
     job.save()
     frappe.db.commit()
+
+    if verification:
+        job.add_comment("Comment", verification)
+        frappe.db.commit()
 
     # Auto-resolve open escalations for this job
     open_escalations = frappe.get_all(
@@ -281,7 +301,7 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
 
     frappe.publish_realtime(
         "ai_procurement_progress",
-        {"job": job_name, "stage": "completed"},
+        {"job": job_name, "stage": stage},
         doctype="AI Procurement Job",
         docname=job_name,
     )
@@ -519,3 +539,67 @@ def _determine_escalation_type(reasons: list[str]) -> str:
         return "Field Dispute"
 
     return "Low Confidence"
+
+
+def _verify_amounts(
+    consensus_data: dict, created: dict, tolerance: float = 0.05,
+) -> tuple[bool, str | None]:
+    """Compare extracted amounts against created ERPNext document totals.
+
+    Args:
+        consensus_data: Extracted/reviewed data with total_amount
+        created: Dict with created document names
+        tolerance: Max allowed difference in document currency
+
+    Returns:
+        (has_mismatch, verification_comment) tuple.
+        has_mismatch is True if any document total exceeds the tolerance.
+    """
+    extracted_total = consensus_data.get("total_amount")
+    if not extracted_total:
+        return False, None
+
+    try:
+        extracted_total = float(extracted_total)
+    except (TypeError, ValueError):
+        return False, None
+
+    lines = []
+    lines.append(f"**Amount Verification** (extracted total: {extracted_total:.2f}, tolerance: {tolerance:.2f})")
+
+    has_mismatch = False
+
+    # Check each created document type
+    for doctype, key in [
+        ("Purchase Order", "purchase_order"),
+        ("Purchase Receipt", "purchase_receipt"),
+        ("Purchase Invoice", "purchase_invoice"),
+    ]:
+        doc_name = created.get(key)
+        if not doc_name:
+            continue
+
+        grand_total = frappe.db.get_value(doctype, doc_name, "grand_total")
+        if grand_total is None:
+            continue
+
+        grand_total = float(grand_total)
+        diff = abs(grand_total - extracted_total)
+        pct = (diff / extracted_total * 100) if extracted_total else 0
+
+        if diff <= tolerance:
+            lines.append(f"- {doctype} {doc_name}: {grand_total:.2f} ✓")
+        else:
+            has_mismatch = True
+            lines.append(
+                f"- {doctype} {doc_name}: {grand_total:.2f} "
+                f"(diff: {diff:.2f}, {pct:.1f}%) ⚠"
+            )
+
+    if len(lines) <= 1:
+        return False, None
+
+    if has_mismatch:
+        lines.insert(0, "⚠ **Amount mismatch detected** — please review the created documents.")
+
+    return has_mismatch, "\n".join(lines)
