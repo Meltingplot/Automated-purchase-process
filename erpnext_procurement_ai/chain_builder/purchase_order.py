@@ -534,7 +534,53 @@ def _adjust_bulk_uom(
             )
             return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), uom_name
 
+    # Step 3: No existing UOM works — compute factor from qty divisors
+    # and auto-create UOM + conversion factor if a suitable one is found
+    if qty == int(qty) and int(qty) > 1:
+        int_qty = int(qty)
+        divisors = _divisors(int_qty)
+        for factor in divisors:
+            if factor <= 1:
+                continue
+            adjusted_rate = rate * factor
+            if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
+                uom_name = str(factor)
+                if not dry_run:
+                    _ensure_uom_exists(uom_name)
+                    _ensure_uom_conversion_factor(uom_name, uom, factor)
+                    if item_code:
+                        _ensure_item_uom(item_code, uom_name, factor)
+                logger.info(
+                    f"Bulk UOM adjustment (auto-created UOM): {qty} x {rate} {uom} "
+                    f"-> {qty / factor} x {adjusted_rate} {uom_name} "
+                    f"(factor {factor}, UOM + conversion factor created)"
+                )
+                return flt(qty / factor, 6), round_based_on_smallest_currency_fraction(adjusted_rate, currency or ""), uom_name
+
     return qty, rate, uom
+
+
+def _divisors(n: int) -> list[int]:
+    """Return sorted list of divisors of n (excluding 1)."""
+    divs = set()
+    for i in range(2, int(n**0.5) + 1):
+        if n % i == 0:
+            divs.add(i)
+            divs.add(n // i)
+    divs.add(n)
+    return sorted(divs)
+
+
+def _ensure_uom_exists(uom_name: str):
+    """Create a UOM record if it doesn't exist."""
+    if frappe.db.exists("UOM", uom_name):
+        return
+    doc = frappe.get_doc({
+        "doctype": "UOM",
+        "uom_name": uom_name,
+    })
+    doc.insert(ignore_permissions=True)
+    logger.info(f"Created UOM: {uom_name}")
 
 
 def _ensure_uom_conversion_factor(from_uom: str, to_uom: str, value: float):
