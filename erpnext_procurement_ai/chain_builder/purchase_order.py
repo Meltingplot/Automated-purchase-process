@@ -5,6 +5,7 @@ Purchase Order creation from extracted data.
 from __future__ import annotations
 
 import logging
+import math
 import re
 
 import frappe
@@ -85,6 +86,10 @@ def create_purchase_order(
         "items": items,
     }
 
+    # Set invoice currency — ERPNext auto-populates conversion_rate
+    if extracted_data.get("currency"):
+        po_data["currency"] = extracted_data["currency"]
+
     # Store order_reference as order_confirmation_no for future matching
     order_ref = extracted_data.get("order_reference", "").strip()
     if order_ref:
@@ -128,8 +133,10 @@ def _build_items(
         rate = float(item.get("unit_price", 0))
         uom = _resolve_uom(item.get("uom", "Nos"))
 
-        # Adjust for very small unit prices (e.g. 1000 resistors at 0.0002 EUR)
-        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom, item_code=item_code)
+        # Adjust for sub-cent unit prices (e.g. 1000 resistors at 0.0002 EUR)
+        qty, rate, uom = _adjust_bulk_uom(
+            qty, rate, uom, item_code=item_code, currency=extracted_data.get("currency"),
+        )
 
         items.append(
             {
@@ -268,16 +275,44 @@ def _is_numeric_uom(uom_name: str) -> bool:
         return False
 
 
-# Minimum rate threshold — prices below this trigger bulk UOM lookup.
-# 0.01 = 1 cent. Anything below is likely priced per-100 or per-1000.
-_MIN_RATE_THRESHOLD = 0.01
+def _get_currency_precision(currency: str | None) -> int:
+    """Return the number of decimal places for a currency.
+
+    Reads ``smallest_currency_fraction_value`` from the Currency doctype.
+    E.g. 0.01 → 2 (EUR, USD), 0.1 → 1, 1 → 0 (JPY).  Defaults to 2.
+    """
+    if not currency:
+        return 2
+    smallest = frappe.db.get_value(
+        "Currency", currency, "smallest_currency_fraction_value", cache=True,
+    )
+    if not smallest or float(smallest) <= 0:
+        return 2
+    return max(0, int(round(-math.log10(float(smallest)))))
+
+
+def _has_cent_fractions(rate: float, currency: str | None = None) -> bool:
+    """Return True if the rate has more decimal places than the currency allows.
+
+    Uses ``smallest_currency_fraction_value`` from the Currency doctype.
+    E.g. for EUR (precision 2): 0.065 → True, 0.07 → False, 11.23 → False.
+    For a currency with precision 1: 0.07 → True, 0.1 → False.
+    """
+    precision = _get_currency_precision(currency)
+    return abs(round(rate, precision) - rate) > 1e-9
 
 
 def _adjust_bulk_uom(
-    qty: float, rate: float, uom: str, item_code: str | None = None
+    qty: float, rate: float, uom: str, item_code: str | None = None,
+    currency: str | None = None,
 ) -> tuple[float, float, str]:
     """
-    Adjust qty/rate/uom when the per-piece price is too small for Item Price.
+    Adjust qty/rate/uom when the per-piece price has sub-cent fractions.
+
+    Precision is checked against the document currency using
+    ``smallest_currency_fraction_value`` from the Currency doctype.
+    ERPNext handles conversion to company currency automatically via
+    ``conversion_rate`` on the document.
 
     ERPNext requires UOM conversions to be registered on the specific Item's
     ``uoms`` child table. So we check in order:
@@ -297,7 +332,7 @@ def _adjust_bulk_uom(
     Only considers numeric UOM names (10, 25, 50, 100, 1000, ...) — named
     UOMs like 'Box' or 'Tray' are skipped as they have item-specific meanings.
     """
-    if rate >= _MIN_RATE_THRESHOLD or rate <= 0 or qty <= 0:
+    if not _has_cent_fractions(rate, currency) or rate <= 0 or qty <= 0:
         return qty, rate, uom
 
     # Only adjust piece-type UOMs — bulk packaging doesn't apply to kg/m/etc.
@@ -317,7 +352,7 @@ def _adjust_bulk_uom(
                 continue
             factor = float(row["conversion_factor"])
             adjusted_rate = rate * factor
-            if adjusted_rate >= _MIN_RATE_THRESHOLD and qty / factor >= 1:
+            if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
                 logger.info(
                     f"Bulk UOM adjustment (item {item_code}): {qty} x {rate} {uom} "
                     f"-> {qty / factor} x {adjusted_rate} {row['uom']} "
@@ -338,7 +373,7 @@ def _adjust_bulk_uom(
             continue
         factor = float(row["value"])
         adjusted_rate = rate * factor
-        if adjusted_rate >= _MIN_RATE_THRESHOLD and qty / factor >= 1:
+        if not _has_cent_fractions(adjusted_rate, currency) and qty / factor >= 1:
             # Register this conversion on the item so ERPNext accepts it
             if item_code:
                 _ensure_item_uom(item_code, row["from_uom"], factor)

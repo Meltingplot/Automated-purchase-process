@@ -46,17 +46,21 @@ def create_purchase_receipt(
     # Retrospective documents must not be dated later than the source document
     doc_date = extracted_data.get("document_date") or today()
 
-    pr = frappe.get_doc(
-        {
-            "doctype": "Purchase Receipt",
-            "supplier": supplier,
-            "company": settings.get("default_company"),
-            "posting_date": doc_date,
-            "ai_retrospective": 1,
-            "ai_procurement_job": job_name,
-            "items": items,
-        }
-    )
+    pr_data = {
+        "doctype": "Purchase Receipt",
+        "supplier": supplier,
+        "company": settings.get("default_company"),
+        "posting_date": doc_date,
+        "ai_retrospective": 1,
+        "ai_procurement_job": job_name,
+        "items": items,
+    }
+
+    # Set invoice currency — ERPNext auto-populates conversion_rate
+    if extracted_data.get("currency"):
+        pr_data["currency"] = extracted_data["currency"]
+
+    pr = frappe.get_doc(pr_data)
 
     pr.insert(ignore_permissions=True)
     pr.add_comment(
@@ -92,7 +96,9 @@ def _build_receipt_items(
         qty = float(item.get("quantity", 1))
         rate = float(item.get("unit_price", 0))
         uom = _resolve_uom(item.get("uom", "Nos"))
-        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom, item_code=item_code)
+        qty, rate, uom = _adjust_bulk_uom(
+            qty, rate, uom, item_code=item_code, currency=extracted_data.get("currency"),
+        )
 
         receipt_item = {
             "item_code": item_code,

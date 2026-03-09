@@ -100,6 +100,7 @@ class AIProcurementJob(Document):
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
         supplier_name = supplier_match.supplier_name if supplier_match.found else ""
+        invoice_currency = clean.get("currency")
 
         items_info = []
         for item in clean.get("items", []):
@@ -113,7 +114,9 @@ class AIProcurementJob(Document):
             qty = float(item.get("quantity", 1) or 1)
             rate = float(item.get("unit_price", 0) or 0)
             uom = _resolve_uom(item.get("uom", "Nos"))
-            adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(qty, rate, uom, item_code=matched)
+            adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(
+                qty, rate, uom, item_code=matched, currency=invoice_currency,
+            )
             if adj_uom != uom:
                 info["uom_adjustment"] = {
                     "original_uom": uom,

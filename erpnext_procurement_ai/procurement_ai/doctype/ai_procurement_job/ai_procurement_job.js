@@ -222,17 +222,24 @@ function _render_review_form(frm) {
             _ITEM_FIELDS.forEach(function (f) {
                 var val = item[f.key];
                 if (val === null || val === undefined) val = "";
-                var input_type =
-                    f.key === "quantity" || f.key === "unit_price"
-                        ? "number"
-                        : "text";
-                var step_attr = input_type === "number" ? ' step="any"' : "";
-                html +=
-                    '<td><input type="' + input_type + '"' +
-                    ' class="form-control input-xs review-item-field"' +
-                    ' data-idx="' + idx + '" data-field="' + f.key + '"' +
-                    ' value="' + frappe.utils.escape_html(String(val)) + '"' +
-                    step_attr + " /></td>";
+                if (f.key === "uom") {
+                    // UOM gets a Link control placeholder (rendered after)
+                    html +=
+                        '<td><div class="uom-link-control" data-idx="' + idx + '"' +
+                        ' data-initial-value="' + frappe.utils.escape_html(String(val)) + '"></div></td>';
+                } else {
+                    var input_type =
+                        f.key === "quantity" || f.key === "unit_price"
+                            ? "number"
+                            : "text";
+                    var step_attr = input_type === "number" ? ' step="any"' : "";
+                    html +=
+                        '<td><input type="' + input_type + '"' +
+                        ' class="form-control input-xs review-item-field"' +
+                        ' data-idx="' + idx + '" data-field="' + f.key + '"' +
+                        ' value="' + frappe.utils.escape_html(String(val)) + '"' +
+                        step_attr + " /></td>";
+                }
             });
             html +=
                 '<td class="item-match-cell" data-idx="' + idx + '">' +
@@ -267,6 +274,25 @@ function _render_review_form(frm) {
             render_input: true,
         });
         control.refresh();
+        $el.data("control", control);
+    });
+
+    // Create Frappe Link controls for UOM fields
+    wrapper.find(".uom-link-control").each(function () {
+        var $el = $(this);
+        var idx = $el.data("idx");
+        var initial_val = $el.data("initial-value") || "Nos";
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "uom_" + idx,
+                options: "UOM",
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        control.set_value(initial_val);
         $el.data("control", control);
     });
 
@@ -327,24 +353,51 @@ function _render_match_badges(wrapper, matches) {
             );
         }
 
-        // Show UOM adjustment suggestion
+        // Show UOM adjustment — make the conversion transparent
         if (info.uom_adjustment) {
             var adj = info.uom_adjustment;
             var $row = wrapper.find('tr[data-item-idx="' + idx + '"]');
-            // Update qty, rate, uom fields with adjusted values
+            // Update qty, rate fields with adjusted values
             $row.find('.review-item-field[data-field="quantity"]').val(adj.adjusted_qty);
             $row.find('.review-item-field[data-field="unit_price"]').val(adj.adjusted_rate);
-            $row.find('.review-item-field[data-field="uom"]').val(adj.bulk_uom);
-            // Show conversion hint below the UOM field
-            var $uom_cell = $row.find('.review-item-field[data-field="uom"]').parent();
-            $uom_cell.append(
-                '<div class="uom-hint text-muted" style="font-size:0.75em;margin-top:2px;">' +
-                    frappe.utils.escape_html(
-                        adj.original_qty + " x " + adj.original_rate + " " + adj.original_uom +
-                        " \u2192 " + adj.adjusted_qty + " x " + adj.adjusted_rate + " " + adj.bulk_uom
-                    ) +
-                    "</div>"
+            // Update UOM Link control with bulk UOM
+            var $uom_link = wrapper.find('.uom-link-control[data-idx="' + idx + '"]');
+            var uom_control = $uom_link.data("control");
+            if (uom_control) {
+                uom_control.set_value(adj.bulk_uom);
+            }
+
+            // Show prominent conversion banner below the row
+            var $conversion_row = $(
+                '<tr class="uom-conversion-row" style="background:var(--subtle-fg);">' +
+                '<td colspan="' + (_ITEM_FIELDS.length + 3) + '" style="padding:4px 12px;">' +
+                '<div style="display:flex;align-items:center;gap:8px;font-size:0.85em;">' +
+                '<span class="badge" style="background:#805ad5;color:#fff;font-size:0.8em;">' +
+                    __("UOM Converted") + '</span>' +
+                '<span style="color:var(--text-muted);">' +
+                    __("Invoice") + ': ' +
+                    '<strong>' + adj.original_qty + ' × ' +
+                    frappe.format_currency(adj.original_rate) + ' ' +
+                    frappe.utils.escape_html(adj.original_uom) + '</strong>' +
+                '</span>' +
+                '<span style="font-size:1.2em;">→</span>' +
+                '<span style="color:var(--text-color);">' +
+                    __("ERP") + ': ' +
+                    '<strong>' + adj.adjusted_qty + ' × ' +
+                    frappe.format_currency(adj.adjusted_rate) + ' ' +
+                    frappe.utils.escape_html(adj.bulk_uom) + '</strong>' +
+                '</span>' +
+                '<span class="text-muted" style="font-size:0.85em;">(' +
+                    __("1 {0} = {1} {2}", [
+                        frappe.utils.escape_html(adj.bulk_uom),
+                        (adj.original_qty / adj.adjusted_qty),
+                        frappe.utils.escape_html(adj.original_uom)
+                    ]) +
+                ')</span>' +
+                '</div>' +
+                '</td></tr>'
             );
+            $row.after($conversion_row);
         }
     });
 }
@@ -434,7 +487,7 @@ function _collect_and_approve(frm) {
         }
     });
 
-    // Collect item fields
+    // Collect item fields (regular inputs)
     var items = consensus.items ? consensus.items.slice() : [];
     wrapper.find(".review-item-field").each(function () {
         var $input = $(this);
@@ -448,6 +501,15 @@ function _collect_and_approve(frm) {
         } else {
             items[idx][field_key] = val;
         }
+    });
+
+    // Collect UOM from Link controls
+    wrapper.find(".uom-link-control").each(function () {
+        var $el = $(this);
+        var idx = parseInt($el.data("idx"), 10);
+        var control = $el.data("control");
+        if (!items[idx]) items[idx] = {};
+        items[idx]["uom"] = control ? control.get_value() || "Nos" : "Nos";
     });
     reviewed.items = items;
 

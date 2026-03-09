@@ -56,6 +56,8 @@ def create_purchase_invoice(
     doc_date = extracted_data.get("document_date") or today()
     due = extracted_data.get("delivery_date") or doc_date
 
+    from .purchase_order import _build_taxes
+
     pi_data = {
         "doctype": "Purchase Invoice",
         "supplier": supplier,
@@ -69,8 +71,9 @@ def create_purchase_invoice(
         "items": items,
     }
 
-    # Add tax charges from extracted data
-    from .purchase_order import _build_taxes
+    # Set invoice currency — ERPNext auto-populates conversion_rate
+    if extracted_data.get("currency"):
+        pi_data["currency"] = extracted_data["currency"]
 
     taxes = _build_taxes(extracted_data, settings)
     if taxes:
@@ -121,7 +124,9 @@ def _build_invoice_items(
         qty = float(item.get("quantity", 1))
         rate = float(item.get("unit_price", 0))
         uom = _resolve_uom(item.get("uom", "Nos"))
-        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom, item_code=item_code)
+        qty, rate, uom = _adjust_bulk_uom(
+            qty, rate, uom, item_code=item_code, currency=extracted_data.get("currency"),
+        )
 
         invoice_item = {
             "item_code": item_code,
