@@ -419,6 +419,18 @@ def sanitize_extracted_data(data: dict) -> dict:
     else:
         clean["discount_amount"] = None
 
+    # Extract surcharge line items (Mindermengenaufschlag, Kleinmengenzuschlag)
+    # — these increase item cost proportionally, applied as "Actual" tax charge.
+    surcharge_items = [item for item in clean["items"] if _is_surcharge_item(item)]
+    if surcharge_items:
+        surcharge_total = sum(abs(item.get("total_price", 0)) for item in surcharge_items)
+        clean["surcharge_amount"] = surcharge_total
+        clean["items"] = [
+            item for item in clean["items"] if not _is_surcharge_item(item)
+        ]
+    else:
+        clean["surcharge_amount"] = None
+
     return clean
 
 
@@ -447,12 +459,27 @@ _DISCOUNT_KEYWORDS = {
 def _is_discount_item(item: dict) -> bool:
     """Detect if a line item represents a discount/rebate.
 
-    Matches by keyword OR by negative total_price (common for discount rows).
+    Matches by keyword AND negative total_price (common for discount rows).
     """
     name = (item.get("item_name") or "").lower()
     has_keyword = any(kw in name for kw in _DISCOUNT_KEYWORDS)
     has_negative_total = (item.get("total_price") or 0) < 0
     return has_keyword and has_negative_total
+
+
+_SURCHARGE_KEYWORDS = {
+    "mindermengenaufschlag", "mindermengenzuschlag",
+    "kleinmengenaufschlag", "kleinmengenzuschlag",
+    "small order surcharge", "minimum quantity surcharge",
+    "mindestmengenaufschlag", "mindestmengenzuschlag",
+    "zuschlag", "aufschlag",
+}
+
+
+def _is_surcharge_item(item: dict) -> bool:
+    """Detect if a line item represents a small-quantity surcharge."""
+    name = (item.get("item_name") or "").lower()
+    return any(kw in name for kw in _SURCHARGE_KEYWORDS)
 
 
 def _sanitize_line_item(item: dict) -> dict:

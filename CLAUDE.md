@@ -152,9 +152,25 @@ All chain builders dynamically query defaults instead of hardcoding names:
 
 All throw clear errors if no fallback exists.
 
+### Item Type Classification
+
+The LLM classifies each line item as `item_type: "stock"` (physical goods) or `"service"` (fees, shipping, licenses, consulting, installation). New Items are created with `is_stock_item=0` for services, `is_stock_item=1` for stock. The field is defined in `llm/schemas.py` (LineItem) and sanitized in `retrospective.py` to only allow "stock"/"service"/None.
+
+### Shipping & Discount Line Item Extraction
+
+`sanitize_extracted_data()` in `retrospective.py` detects and extracts special line items before they reach the chain builders:
+
+- **Shipping items** — removed from the items list when `shipping_cost` is already set (avoids double-counting). Detected by keywords (versand, shipping, freight, dhl, dpd, ups, etc.) via `_is_shipping_item()`.
+- **Discount items** (Rabatt/Skonto/Vorkasserabatt) — removed from the items list and summed into `discount_amount`. Detected by keyword AND negative `total_price` via `_is_discount_item()`. Applied as document-level `discount_amount` with `apply_discount_on: "Net Total"` on PO/PR/PI, so it reduces the invoiced amount without affecting individual item rates or warehouse stock values.
+- **Surcharge items** (Mindermengenaufschlag/Kleinmengenzuschlag) — removed from items list and summed into `surcharge_amount`. Detected by keyword via `_is_surcharge_item()`. Applied as "Actual" charge in `_build_taxes()` (like shipping), so it increases item cost proportionally.
+
+### Item Code Consistency Across Chain
+
+When the chain builder creates PO → PR → PI, downstream builders (PR, PI) must use the same `item_code` as the PO. The `po_item_links` / `pr_item_links` dicts carry `item_code` from upstream documents. PR/PI builders prioritize linked item_code over re-resolution to prevent ERPNext validation errors ("Item Code must be equal to...").
+
 ### UOM Mapping
 
-German UOM aliases from LLM output are mapped to ERPNext standard UOMs (`_resolve_uom` in `purchase_order.py`): `Stk/Stück` → `Nos`, `kg` → `Kg`, etc. Falls back to `"Nos"` if no match.
+German UOM aliases from LLM output are mapped to ERPNext standard UOMs (`_resolve_uom` in `purchase_order.py`): `Stk/Stück` → system piece UOM (dynamically resolved), `kg` → `Kg`, etc. Falls back to the system piece UOM if no match. UOM Conversion Factor records require a `category` field (Link to UOM Category) — `_get_uom_category()` prefers "Anzahl", falls back to the first available category.
 
 ### Tax Handling
 
@@ -213,7 +229,13 @@ LangGraph, LangChain (anthropic/openai/google-genai), pdfplumber, pytesseract, e
 - **Never hardcode ERPNext master data names** (Supplier Group, Item Group, Warehouse, Account). Always query defaults from Settings/Company first, then fall back to dynamic lookup, then `frappe.throw()` with a clear message
 - Item matching logic lives in `purchase_order._resolve_item()` and is reused by all three chain builders via import
 - UOM resolution lives in `purchase_order._resolve_uom()` and is reused by all three chain builders via import
-- New items are created with `delivered_by_supplier=1` and linked to the supplier via `supplier_items` child table
+- New items are created with `delivered_by_supplier=1` and linked to the supplier via `supplier_items` child table. `is_stock_item` is set based on `item_type` ("service" → 0, else → 1)
 - LLM extraction uses NET amounts; tax is added separately via `Purchase Taxes and Charges` rows on PO/PI
+- PR/PI builders must use `item_code` from `po_item_links`/`pr_item_links` when available — never re-resolve independently
+- Shipping and discount line items are extracted into document-level fields during sanitization, not kept as item rows
+- Phone numbers: `_clean_phone()` replaces `/` with space (German area/number format with `/` is rejected by Frappe)
+- UOM Conversion Factor requires `category` field — use `_get_uom_category()` (prefers "Anzahl")
+- `frm.call("method_name")` (string form) invokes document methods; `frm.call({ method: "name" })` (object form) resolves as module-level function — use string form for `@frappe.whitelist()` methods on the DocType class
+- `process_document` on AI Procurement Job allows statuses: Pending, Error, Needs Review
 - `frappe.enqueue()` parameter naming: use `procurement_job_name` (not `job_name`) to avoid collision with frappe's reserved `job_name` parameter
 - `get_password()` calls must use `raise_exception=False` for optional API key fields

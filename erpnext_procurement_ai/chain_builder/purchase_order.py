@@ -192,13 +192,13 @@ def _build_shipping_charges(extracted_data: dict, settings: dict) -> list[dict]:
 
 
 def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
-    """Build Purchase Taxes and Charges (shipping + VAT)."""
+    """Build Purchase Taxes and Charges (shipping + surcharges + VAT)."""
     company = settings.get("default_company")
     taxes = []
+    has_actual_rows = False
 
-    # Shipping first (Actual amount), so VAT can reference it
+    # Shipping (Actual amount)
     shipping = extracted_data.get("shipping_cost")
-    has_shipping = False
     if shipping:
         try:
             shipping_amount = float(shipping)
@@ -216,7 +216,28 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
                         "add_deduct_tax": "Add",
                     }
                 )
-                has_shipping = True
+                has_actual_rows = True
+
+    # Surcharge / Mindermengenaufschlag (Actual amount, increases item cost)
+    surcharge = extracted_data.get("surcharge_amount")
+    if surcharge:
+        try:
+            surcharge_amount = float(surcharge)
+        except (TypeError, ValueError):
+            surcharge_amount = 0
+        if surcharge_amount > 0:
+            surcharge_account = _get_shipping_account(company)
+            if surcharge_account:
+                taxes.append(
+                    {
+                        "charge_type": "Actual",
+                        "account_head": surcharge_account,
+                        "tax_amount": surcharge_amount,
+                        "description": "Mindermengenaufschlag",
+                        "add_deduct_tax": "Add",
+                    }
+                )
+                has_actual_rows = True
 
     # Collect tax rates from items
     tax_rates = set()
@@ -240,9 +261,9 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
                     "rate": rate,
                     "description": f"VAT {rate:.1f}%",
                 }
-                if has_shipping:
+                if has_actual_rows:
                     tax_row["charge_type"] = "On Previous Row Total"
-                    tax_row["row_id"] = len(taxes)  # references the shipping row
+                    tax_row["row_id"] = len(taxes)  # references last Actual row
                 else:
                     tax_row["charge_type"] = "On Net Total"
                 taxes.append(tax_row)
