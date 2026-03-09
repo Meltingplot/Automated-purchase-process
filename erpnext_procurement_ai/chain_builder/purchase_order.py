@@ -134,7 +134,7 @@ def _build_items(
         item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
-        uom_raw = item.get("uom", "Nos")
+        uom_raw = item.get("uom") or ""
         _ensure_numeric_uom_setup(uom_raw)
         uom = _resolve_uom(uom_raw)
 
@@ -315,14 +315,41 @@ def _get_shipping_account(company: str) -> str | None:
     return None
 
 
-# Common German UOM aliases → ERPNext standard UOM names
+# Candidate names for the "piece" UOM, checked in order.
+# ERPNext international uses "Nos"; German installations typically have "Stk".
+_PIECE_UOM_CANDIDATES = ("Nos", "Stk", "Stück", "Stk.")
+
+# Cache for the resolved piece UOM name (populated on first call)
+_piece_uom_cache: str | None = None
+
+
+def _get_piece_uom() -> str:
+    """Return the piece UOM that exists in this ERPNext instance.
+
+    Checks common piece UOM names in order of preference and returns the
+    first one found.  If none exist, creates "Nos" as a safe default.
+    """
+    global _piece_uom_cache
+    if _piece_uom_cache is not None:
+        return _piece_uom_cache
+
+    for candidate in _PIECE_UOM_CANDIDATES:
+        if frappe.db.exists("UOM", candidate):
+            _piece_uom_cache = candidate
+            return candidate
+
+    # No piece UOM found at all — create the ERPNext standard one
+    _ensure_uom_exists("Nos")
+    _piece_uom_cache = "Nos"
+    return "Nos"
+
+
+# Common German UOM aliases → ERPNext standard UOM names.
+# Piece-unit aliases use a sentinel that gets resolved dynamically
+# via _get_piece_uom() in _resolve_uom().
+_PIECE_UOM_ALIASES = {"stk", "stück", "stk.", "pcs", "pc", "ea", "nos"}
+
 _UOM_MAP = {
-    "stk": "Nos",
-    "stück": "Nos",
-    "stk.": "Nos",
-    "pcs": "Nos",
-    "pc": "Nos",
-    "ea": "Nos",
     "kg": "Kg",
     "g": "Gram",
     "l": "Liter",
@@ -356,15 +383,21 @@ def _true_unit_price(item: dict, qty: float) -> float:
 def _resolve_uom(uom: str) -> str:
     """Map LLM-extracted UOM to a valid ERPNext UOM.
 
-    Checks the alias map first so that e.g. "STK", "Stk", "stk" all
-    resolve to the canonical "Nos" rather than a case-variant that
-    exists in MariaDB due to case-insensitive collation.
+    Checks piece-unit aliases first (stk/Stück/pcs/ea/Nos → system piece UOM),
+    then the static alias map, then checks for an exact match in the DB.
+    Falls back to the system piece UOM if nothing matches.
     """
     if not uom:
-        return "Nos"
+        return _get_piece_uom()
 
-    # Try mapping first (normalizes LLM case variants like STK/Stk/stk → Nos)
-    mapped = _UOM_MAP.get(uom.lower().strip())
+    normalised = uom.lower().strip()
+
+    # Piece-unit aliases → system piece UOM (Nos or Stk depending on install)
+    if normalised in _PIECE_UOM_ALIASES:
+        return _get_piece_uom()
+
+    # Static alias map (kg, g, l, m, km)
+    mapped = _UOM_MAP.get(normalised)
     if mapped and frappe.db.exists("UOM", mapped):
         return mapped
 
@@ -374,7 +407,7 @@ def _resolve_uom(uom: str) -> str:
     if stored:
         return stored
 
-    return "Nos"
+    return _get_piece_uom()
 
 
 def _is_numeric_uom(uom_name: str) -> bool:
@@ -571,14 +604,15 @@ def _ensure_numeric_uom_setup(uom_raw: str, item_code: str | None = None):
     """Ensure a numeric UOM exists with proper conversion factors.
 
     When the review UI sets uom to e.g. "10", the UOM record, global
-    conversion factor (10 → Nos), and Item UOM Conversion Detail must
-    all exist before ERPNext's insert() runs set_missing_values().
+    conversion factor (10 → piece UOM), and Item UOM Conversion Detail
+    must all exist before ERPNext's insert() runs set_missing_values().
     """
     if not _is_numeric_uom(uom_raw):
         return
+    piece_uom = _get_piece_uom()
     factor = float(uom_raw)
     _ensure_uom_exists(uom_raw)
-    _ensure_uom_conversion_factor(uom_raw, "Nos", factor)
+    _ensure_uom_conversion_factor(uom_raw, piece_uom, factor)
     if item_code and frappe.db.exists("Item", item_code):
         _ensure_item_uom(item_code, uom_raw, factor)
 
@@ -853,7 +887,7 @@ def _create_item(item: dict, supplier: str, settings: dict, stock_uom: str | Non
     item_name = _sanitize_text(item.get("item_name", "Unknown Item"), max_len=140)
     item_desc = _sanitize_text(item.get("description", item_name), max_len=500)
     item_code = _sanitize_code(item.get("item_code", ""))
-    uom = _resolve_uom(item.get("uom", "Nos"))
+    uom = _resolve_uom(item.get("uom") or "")
     # Use user-specified stock UOM if provided, otherwise default to transaction UOM
     effective_stock_uom = _resolve_uom(stock_uom) if stock_uom else uom
 

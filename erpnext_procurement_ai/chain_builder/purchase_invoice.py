@@ -133,7 +133,7 @@ def _build_invoice_items(
         item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
-        uom_raw = item.get("uom", "Nos")
+        uom_raw = item.get("uom") or ""
         _ensure_numeric_uom_setup(uom_raw)
         uom = _resolve_uom(uom_raw)
         qty, rate, uom = _adjust_bulk_uom(

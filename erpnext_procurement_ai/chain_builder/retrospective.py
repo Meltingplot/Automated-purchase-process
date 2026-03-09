@@ -409,7 +409,7 @@ def _sanitize_line_item(item: dict) -> dict:
         "item_name": _clean_text(item.get("item_name", "Unknown Item"), max_len=140),
         "description": _clean_text(item.get("description", ""), max_len=500),
         "quantity": _clean_numeric(item.get("quantity")) or 1,
-        "uom": _clean_text(item.get("uom", "Nos"), max_len=20),
+        "uom": _clean_text(item.get("uom", ""), max_len=20),
         "unit_price": _clean_numeric(item.get("unit_price")) or 0,
         "total_price": _clean_numeric(item.get("total_price")) or 0,
         "tax_rate": _clean_numeric(item.get("tax_rate")),
