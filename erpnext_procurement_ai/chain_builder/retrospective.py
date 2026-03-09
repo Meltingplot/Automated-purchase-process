@@ -326,10 +326,14 @@ def _clean_email(value: str) -> str:
 
 
 def _clean_phone(value: str) -> str:
-    """Keep only phone-valid characters."""
+    """Keep only phone-valid characters.
+
+    Frappe rejects '/' in phone fields, so replace with space.
+    """
     if not isinstance(value, str):
         return ""
-    cleaned = re.sub(r"[^\d\s\-+/()\.]", "", value).strip()
+    value = value.replace("/", " ")
+    cleaned = re.sub(r"[^\d\s\-+()\.]", "", value).strip()
     return cleaned[:30]
 
 
