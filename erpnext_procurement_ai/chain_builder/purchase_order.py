@@ -185,6 +185,26 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
             }
         )
 
+    # Add shipping cost as an "Actual" charge
+    shipping = extracted_data.get("shipping_cost")
+    if shipping:
+        try:
+            shipping_amount = float(shipping)
+        except (TypeError, ValueError):
+            shipping_amount = 0
+        if shipping_amount > 0:
+            shipping_account = _get_shipping_account(company)
+            if shipping_account:
+                taxes.append(
+                    {
+                        "charge_type": "Actual",
+                        "account_head": shipping_account,
+                        "tax_amount": shipping_amount,
+                        "description": "Shipping / Versandkosten",
+                        "add_deduct_tax": "Add",
+                    }
+                )
+
     return taxes
 
 
@@ -226,6 +246,35 @@ def _get_tax_account(company: str) -> str | None:
         return accounts[0]["name"]
 
     logger.warning(f"No tax account found for company {company!r}")
+    return None
+
+
+def _get_shipping_account(company: str) -> str | None:
+    """Find an expense account suitable for shipping/freight charges."""
+    if not company:
+        return None
+
+    # Try to find a shipping/freight specific account
+    for keyword in ("shipping", "freight", "versand", "fracht", "transport"):
+        accounts = frappe.get_all(
+            "Account",
+            filters={
+                "company": company,
+                "is_group": 0,
+                "name": ["like", f"%{keyword}%"],
+            },
+            fields=["name"],
+            limit=1,
+        )
+        if accounts:
+            return accounts[0]["name"]
+
+    # Fall back to the company's default expense account
+    default = frappe.db.get_value("Company", company, "default_expense_account")
+    if default:
+        return default
+
+    logger.warning(f"No shipping account found for company {company!r}")
     return None
 
 
