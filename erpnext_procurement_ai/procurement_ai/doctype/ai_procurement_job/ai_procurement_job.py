@@ -131,6 +131,10 @@ class AIProcurementJob(Document):
                 "resolved_uom": uom,
             }
 
+            # Include stock UOM for existing items (can't be changed)
+            if matched:
+                info["stock_uom"] = frappe.db.get_value("Item", matched, "stock_uom")
+
             # Check if bulk UOM adjustment would apply
             adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(
                 qty, rate, uom, item_code=matched, currency=invoice_currency,

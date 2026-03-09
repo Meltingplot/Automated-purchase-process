@@ -311,6 +311,20 @@ function _render_review_form(frm) {
                 fieldname: "item_map_" + idx,
                 options: "Item",
                 placeholder: __("Auto-resolve"),
+                change: function () {
+                    var item_code = control.get_value();
+                    if (item_code) {
+                        // Fetch stock_uom and lock the warehouse UOM field
+                        frappe.db.get_value("Item", item_code, "stock_uom", function (r) {
+                            if (r && r.stock_uom) {
+                                _set_stock_uom_readonly(wrapper, idx, r.stock_uom);
+                            }
+                        });
+                    } else {
+                        // Cleared — unlock the warehouse UOM field
+                        _set_stock_uom_editable(wrapper, idx);
+                    }
+                },
             },
             parent: $el,
             render_input: true,
@@ -421,6 +435,10 @@ function _render_match_badges(wrapper, matches) {
             var control = $link.data("control");
             if (control) {
                 control.set_value(info.item_code);
+            }
+            // Set stock UOM from existing item and disable it
+            if (info.stock_uom) {
+                _set_stock_uom_readonly(wrapper, idx, info.stock_uom);
             }
         } else {
             $cell.html(
@@ -780,6 +798,30 @@ function _render_created_docs(frm) {
     ) {
         frm.dashboard.add_section(html, __("Created Documents"));
     }
+}
+
+function _set_stock_uom_readonly(wrapper, idx, stock_uom) {
+    var $el = wrapper.find('.stock-uom-control[data-idx="' + idx + '"]');
+    var control = $el.data("control");
+    if (control) {
+        control.set_value(stock_uom);
+        control.$input.prop("disabled", true);
+        control.$input.css("background", "var(--subtle-fg)");
+    }
+    // Also disable the factor input — existing items have their own conversions
+    wrapper.find('.review-item-field[data-idx="' + idx + '"][data-field="uom_conversion_factor"]')
+        .prop("disabled", true).css("background", "var(--subtle-fg)");
+}
+
+function _set_stock_uom_editable(wrapper, idx) {
+    var $el = wrapper.find('.stock-uom-control[data-idx="' + idx + '"]');
+    var control = $el.data("control");
+    if (control) {
+        control.$input.prop("disabled", false);
+        control.$input.css("background", "");
+    }
+    wrapper.find('.review-item-field[data-idx="' + idx + '"][data-field="uom_conversion_factor"]')
+        .prop("disabled", false).css("background", "");
 }
 
 function _update_progress(frm, stage) {
