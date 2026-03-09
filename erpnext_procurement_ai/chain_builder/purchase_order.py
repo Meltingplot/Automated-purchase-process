@@ -95,7 +95,10 @@ def create_purchase_order(
     if order_ref:
         po_data["order_confirmation_no"] = order_ref
 
-    # Taxes are only added to Purchase Invoice, not PO/PR
+    # Add tax charges (shipping + VAT) — same as PI so amounts match
+    taxes = _build_taxes(extracted_data, settings)
+    if taxes:
+        po_data["taxes"] = taxes
 
     po = frappe.get_doc(po_data)
     po.insert(ignore_permissions=True)
@@ -149,8 +152,36 @@ def _build_items(
     return items
 
 
+def _build_shipping_charges(extracted_data: dict, settings: dict) -> list[dict]:
+    """Build shipping-only charges for PO/PR (no VAT)."""
+    shipping = extracted_data.get("shipping_cost")
+    if not shipping:
+        return []
+    try:
+        shipping_amount = float(shipping)
+    except (TypeError, ValueError):
+        return []
+    if shipping_amount <= 0:
+        return []
+
+    company = settings.get("default_company")
+    shipping_account = _get_shipping_account(company)
+    if not shipping_account:
+        return []
+
+    return [
+        {
+            "charge_type": "Actual",
+            "account_head": shipping_account,
+            "tax_amount": shipping_amount,
+            "description": "Shipping / Versandkosten",
+            "add_deduct_tax": "Add",
+        }
+    ]
+
+
 def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
-    """Build Purchase Taxes and Charges from extracted tax info."""
+    """Build Purchase Taxes and Charges for PI (shipping + VAT)."""
     # Collect tax rates from items
     tax_rates = set()
     for item in extracted_data.get("items", []):

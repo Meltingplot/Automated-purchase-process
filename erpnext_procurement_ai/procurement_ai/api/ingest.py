@@ -569,61 +569,37 @@ def _verify_amounts(
     except (TypeError, ValueError):
         return False, None
 
-    # Taxes are only on PI. PO and PR are net → compare against subtotal.
-    extracted_subtotal = consensus_data.get("subtotal")
-    try:
-        extracted_subtotal = float(extracted_subtotal) if extracted_subtotal else None
-    except (TypeError, ValueError):
-        extracted_subtotal = None
-
     lines = []
     lines.append(f"**Amount Verification** (extracted total: {extracted_total:.2f}, tolerance: {tolerance:.2f})")
 
     has_mismatch = False
 
-    # PO and PR have no taxes → compare against subtotal (net)
+    # All three docs have the same taxes (shipping + VAT) → compare grand_total
     for doctype, key in [
         ("Purchase Order", "purchase_order"),
         ("Purchase Receipt", "purchase_receipt"),
+        ("Purchase Invoice", "purchase_invoice"),
     ]:
         doc_name = created.get(key)
-        if not doc_name or not extracted_subtotal:
+        if not doc_name:
             continue
 
-        doc_total = frappe.db.get_value(doctype, doc_name, "total")
-        if doc_total is None:
+        grand_total = frappe.db.get_value(doctype, doc_name, "grand_total")
+        if grand_total is None:
             continue
 
-        doc_total = float(doc_total)
-        diff = abs(doc_total - extracted_subtotal)
-        pct = (diff / extracted_subtotal * 100) if extracted_subtotal else 0
+        grand_total = float(grand_total)
+        diff = abs(grand_total - extracted_total)
+        pct = (diff / extracted_total * 100) if extracted_total else 0
 
         if diff <= tolerance:
-            lines.append(f"- {doctype} {doc_name}: {doc_total:.2f} (net) ✓")
+            lines.append(f"- {doctype} {doc_name}: {grand_total:.2f} ✓")
         else:
             has_mismatch = True
             lines.append(
-                f"- {doctype} {doc_name}: {doc_total:.2f} vs subtotal {extracted_subtotal:.2f} "
+                f"- {doctype} {doc_name}: {grand_total:.2f} "
                 f"(diff: {diff:.2f}, {pct:.1f}%) ⚠"
             )
-
-    # PI has taxes → compare grand_total against extracted total_amount
-    pi_name = created.get("purchase_invoice")
-    if pi_name:
-        grand_total = frappe.db.get_value("Purchase Invoice", pi_name, "grand_total")
-        if grand_total is not None:
-            grand_total = float(grand_total)
-            diff = abs(grand_total - extracted_total)
-            pct = (diff / extracted_total * 100) if extracted_total else 0
-
-            if diff <= tolerance:
-                lines.append(f"- Purchase Invoice {pi_name}: {grand_total:.2f} ✓")
-            else:
-                has_mismatch = True
-                lines.append(
-                    f"- Purchase Invoice {pi_name}: {grand_total:.2f} "
-                    f"(diff: {diff:.2f}, {pct:.1f}%) ⚠"
-                )
 
     if len(lines) <= 1:
         return False, None

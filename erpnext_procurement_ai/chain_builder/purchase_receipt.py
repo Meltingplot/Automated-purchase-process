@@ -60,6 +60,13 @@ def create_purchase_receipt(
     if extracted_data.get("currency"):
         pr_data["currency"] = extracted_data["currency"]
 
+    # Add tax charges (shipping + VAT) — same as PI so amounts match
+    from .purchase_order import _build_taxes
+
+    taxes = _build_taxes(extracted_data, settings)
+    if taxes:
+        pr_data["taxes"] = taxes
+
     pr = frappe.get_doc(pr_data)
 
     pr.insert(ignore_permissions=True)
