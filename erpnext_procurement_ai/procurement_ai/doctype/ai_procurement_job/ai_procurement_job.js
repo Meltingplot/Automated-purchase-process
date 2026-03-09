@@ -299,7 +299,7 @@ function _render_match_badges(wrapper, matches) {
         );
     }
 
-    // Item badges
+    // Item badges + UOM adjustments
     var items = matches.items || [];
     items.forEach(function (info, idx) {
         var $cell = wrapper.find('.item-match-cell[data-idx="' + idx + '"]');
@@ -324,6 +324,26 @@ function _render_match_badges(wrapper, matches) {
                 '<span class="badge badge-info" style="background:#3182ce;color:#fff;font-size:0.75em;">' +
                     __("New") +
                     "</span>"
+            );
+        }
+
+        // Show UOM adjustment suggestion
+        if (info.uom_adjustment) {
+            var adj = info.uom_adjustment;
+            var $row = wrapper.find('tr[data-item-idx="' + idx + '"]');
+            // Update qty, rate, uom fields with adjusted values
+            $row.find('.review-item-field[data-field="quantity"]').val(adj.adjusted_qty);
+            $row.find('.review-item-field[data-field="unit_price"]').val(adj.adjusted_rate);
+            $row.find('.review-item-field[data-field="uom"]').val(adj.bulk_uom);
+            // Show conversion hint below the UOM field
+            var $uom_cell = $row.find('.review-item-field[data-field="uom"]').parent();
+            $uom_cell.append(
+                '<div class="uom-hint text-muted" style="font-size:0.75em;margin-top:2px;">' +
+                    frappe.utils.escape_html(
+                        adj.original_qty + " x " + adj.original_rate + " " + adj.original_uom +
+                        " \u2192 " + adj.adjusted_qty + " x " + adj.adjusted_rate + " " + adj.bulk_uom
+                    ) +
+                    "</div>"
             );
         }
     });

@@ -90,8 +90,12 @@ class AIProcurementJob(Document):
                 "confidence": supplier_match.match_confidence,
             }
 
-        # Check each item (try_resolve only, no creation)
-        from ...chain_builder.purchase_order import _try_resolve_item
+        # Check each item (try_resolve only, no creation) + UOM adjustment
+        from ...chain_builder.purchase_order import (
+            _adjust_bulk_uom,
+            _resolve_uom,
+            _try_resolve_item,
+        )
 
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
@@ -100,9 +104,26 @@ class AIProcurementJob(Document):
         items_info = []
         for item in clean.get("items", []):
             matched = _try_resolve_item(item, settings, supplier_name)
-            if matched:
-                items_info.append({"item_code": matched, "exists": True})
-            else:
-                items_info.append({"item_code": None, "exists": False})
+            info = {
+                "item_code": matched if matched else None,
+                "exists": bool(matched),
+            }
+
+            # Check if bulk UOM adjustment would apply
+            qty = float(item.get("quantity", 1) or 1)
+            rate = float(item.get("unit_price", 0) or 0)
+            uom = _resolve_uom(item.get("uom", "Nos"))
+            adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(qty, rate, uom)
+            if adj_uom != uom:
+                info["uom_adjustment"] = {
+                    "original_uom": uom,
+                    "bulk_uom": adj_uom,
+                    "original_qty": qty,
+                    "adjusted_qty": adj_qty,
+                    "original_rate": rate,
+                    "adjusted_rate": adj_rate,
+                }
+
+            items_info.append(info)
 
         return {"supplier": supplier_info, "items": items_info}

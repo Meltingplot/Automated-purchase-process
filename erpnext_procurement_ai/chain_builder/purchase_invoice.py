@@ -113,17 +113,22 @@ def _build_invoice_items(
     company = settings.get("default_company")
     items = []
 
-    from .purchase_order import _resolve_item, _resolve_uom
+    from .purchase_order import _adjust_bulk_uom, _resolve_item, _resolve_uom
 
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
         item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
+        qty = float(item.get("quantity", 1))
+        rate = float(item.get("unit_price", 0))
+        uom = _resolve_uom(item.get("uom", "Nos"))
+        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom)
+
         invoice_item = {
             "item_code": item_code,
             "item_name": item.get("item_name", "Unknown Item"),
-            "qty": float(item.get("quantity", 1)),
-            "rate": float(item.get("unit_price", 0)),
-            "uom": _resolve_uom(item.get("uom", "Nos")),
+            "qty": qty,
+            "rate": rate,
+            "uom": uom,
             "expense_account": _get_default_expense_account(company),
         }
 

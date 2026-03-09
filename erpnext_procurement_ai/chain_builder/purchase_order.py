@@ -124,13 +124,20 @@ def _build_items(
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
         item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
+        qty = float(item.get("quantity", 1))
+        rate = float(item.get("unit_price", 0))
+        uom = _resolve_uom(item.get("uom", "Nos"))
+
+        # Adjust for very small unit prices (e.g. 1000 resistors at 0.0002 EUR)
+        qty, rate, uom = _adjust_bulk_uom(qty, rate, uom)
+
         items.append(
             {
                 "item_code": item_code,
                 "item_name": item.get("item_name", "Unknown Item"),
-                "qty": float(item.get("quantity", 1)),
-                "rate": float(item.get("unit_price", 0)),
-                "uom": _resolve_uom(item.get("uom", "Nos")),
+                "qty": qty,
+                "rate": rate,
+                "uom": uom,
                 "schedule_date": schedule_date,
             }
         )
@@ -246,6 +253,56 @@ def _resolve_uom(uom: str) -> str:
         return mapped
 
     return "Nos"
+
+
+# Minimum rate threshold — prices below this trigger bulk UOM lookup.
+# 0.01 = 1 cent. Anything below is likely priced per-100 or per-1000.
+_MIN_RATE_THRESHOLD = 0.01
+
+
+def _adjust_bulk_uom(
+    qty: float, rate: float, uom: str
+) -> tuple[float, float, str]:
+    """
+    Adjust qty/rate/uom when the per-piece price is too small for Item Price.
+
+    If rate < threshold, look for a UOM in ERPNext's UOM Conversion Factor
+    table that converts from a bulk UOM to the current UOM with a suitable
+    factor (e.g. UOM "100" → "Nos" factor 100). Then:
+      new_qty  = qty / factor
+      new_rate = rate * factor
+      new_uom  = bulk_uom
+
+    Only applies to piece-type UOMs (Nos) where bulk packaging makes sense.
+    """
+    if rate >= _MIN_RATE_THRESHOLD or rate <= 0 or qty <= 0:
+        return qty, rate, uom
+
+    # Only adjust piece-type UOMs — bulk packaging doesn't apply to kg/m/etc.
+    if uom not in ("Nos", "Stk", "Stück", "pcs"):
+        return qty, rate, uom
+
+    # Find bulk UOMs that convert to current UOM, sorted by smallest factor
+    # that brings the rate above the threshold.
+    bulk_uoms = frappe.get_all(
+        "UOM Conversion Factor",
+        filters={"to_uom": uom, "value": [">", 1]},
+        fields=["from_uom", "value"],
+        order_by="value asc",
+    )
+
+    for row in bulk_uoms:
+        factor = float(row["value"])
+        adjusted_rate = rate * factor
+        if adjusted_rate >= _MIN_RATE_THRESHOLD and qty / factor >= 1:
+            logger.info(
+                f"Bulk UOM adjustment: {qty} x {rate} {uom} "
+                f"-> {qty / factor} x {adjusted_rate} {row['from_uom']} "
+                f"(factor {factor})"
+            )
+            return qty / factor, adjusted_rate, row["from_uom"]
+
+    return qty, rate, uom
 
 
 def _get_default_item_group() -> str:
