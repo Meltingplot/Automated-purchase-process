@@ -112,7 +112,10 @@ def run_extraction_pipeline(procurement_job_name: str):
 
         # Step 1: Extract text from document
         raw_text, images = _extract_document(job, settings)
-        job.raw_text_ocr = raw_text
+        # Strip null bytes / control chars from OCR text before storing
+        import re as _re
+
+        job.raw_text_ocr = _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", raw_text)
         job.save()
         frappe.db.commit()
 
@@ -161,12 +164,16 @@ def run_extraction_pipeline(procurement_job_name: str):
         # Step 4: Check if escalation is needed
         if result.get("needs_escalation"):
             job.status = "Needs Review"
+            # Sanitize escalation reasons (pipeline-sourced, may contain LLM text)
+            reasons = result.get("escalation_reasons", [])
             job.escalation_reason = "\n".join(
-                result.get("escalation_reasons", [])
+                str(r)[:500] for r in reasons if isinstance(r, str)
             )
-            job.confidence_score = result.get("confidence", 0.0)
+            job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
             job.consensus_data = json.dumps(result.get("consensus") or {})
-            job.detected_type = result.get("source_type_hint", "")
+            job.detected_type = _validate_source_type(
+                result.get("source_type_hint", "")
+            )
             job.save()
             frappe.db.commit()
 
@@ -199,9 +206,9 @@ def run_extraction_pipeline(procurement_job_name: str):
 
         # Step 6: Update job with results
         job.status = "Completed"
-        job.confidence_score = result.get("confidence", 0.0)
+        job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
         job.consensus_data = json.dumps(consensus_data)
-        job.detected_type = source_type
+        job.detected_type = _validate_source_type(source_type)
         job.created_supplier = created.get("supplier")
         job.created_po = created.get("purchase_order")
         job.created_receipt = created.get("purchase_receipt")
@@ -224,7 +231,7 @@ def run_extraction_pipeline(procurement_job_name: str):
         try:
             job = frappe.get_doc("AI Procurement Job", job_name)
             job.status = "Error"
-            job.escalation_reason = str(e)
+            job.escalation_reason = str(e)[:2000]
             job.save()
             frappe.db.commit()
         except Exception:
@@ -337,15 +344,16 @@ def _save_extraction_results(job, pipeline_result: dict):
 def _create_escalation(job, pipeline_result: dict):
     """Create an AI Escalation Log entry."""
     reasons = pipeline_result.get("escalation_reasons", [])
-    disputed = pipeline_result.get("consensus", {})
+    # Sanitize reason strings (may contain LLM output fragments)
+    clean_reasons = [str(r)[:500] for r in reasons if isinstance(r, str)]
 
     escalation = frappe.get_doc(
         {
             "doctype": "AI Escalation Log",
             "procurement_job": job.name,
-            "escalation_type": _determine_escalation_type(reasons),
+            "escalation_type": _determine_escalation_type(clean_reasons),
             "status": "Open",
-            "reason": "\n".join(reasons),
+            "reason": "\n".join(clean_reasons)[:2000],
             "disputed_fields": json.dumps(
                 pipeline_result.get("disputed_fields", {})
             ),
@@ -362,11 +370,22 @@ def _create_escalation(job, pipeline_result: dict):
                 subject=f"AI Procurement Escalation: {job.name}",
                 message=(
                     f"Job {job.name} requires manual review.\n\n"
-                    f"Reasons:\n" + "\n".join(f"- {r}" for r in reasons)
+                    f"Reasons:\n"
+                    + "\n".join(f"- {r}" for r in clean_reasons)
                 ),
             )
         except Exception as e:
             logger.error(f"Failed to send escalation email: {e}")
+
+
+_VALID_SOURCE_TYPES = {"", "Cart", "Order Confirmation", "Delivery Note", "Invoice"}
+
+
+def _validate_source_type(value: str) -> str:
+    """Validate source type against DocType Select options."""
+    if isinstance(value, str) and value in _VALID_SOURCE_TYPES:
+        return value
+    return ""
 
 
 def _determine_escalation_type(reasons: list[str]) -> str:

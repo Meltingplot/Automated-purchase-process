@@ -47,7 +47,7 @@ def _create_supplier(data: dict) -> str:
         {
             "doctype": "Supplier",
             "supplier_name": supplier_name,
-            "supplier_group": "All Supplier Groups",
+            "supplier_group": _get_default_supplier_group(),
             "supplier_type": "Company",
             "country": _detect_country(data),
         }
@@ -64,6 +64,40 @@ def _create_supplier(data: dict) -> str:
 
     logger.info(f"Created new supplier: {supplier.name}")
     return supplier.name
+
+
+def _get_default_supplier_group() -> str:
+    """Get the default or first available Supplier Group."""
+    # Try the ERPNext default buying settings first
+    default = frappe.db.get_single_value("Buying Settings", "supplier_group")
+    if default:
+        return default
+
+    # Fall back to first non-group Supplier Group
+    groups = frappe.get_all(
+        "Supplier Group",
+        filters={"is_group": 0},
+        fields=["name"],
+        order_by="creation asc",
+        limit=1,
+    )
+    if groups:
+        return groups[0]["name"]
+
+    # Last resort: first Supplier Group of any kind
+    groups = frappe.get_all(
+        "Supplier Group",
+        fields=["name"],
+        order_by="creation asc",
+        limit=1,
+    )
+    if groups:
+        return groups[0]["name"]
+
+    frappe.throw(
+        "No Supplier Group found. Please create at least one Supplier Group "
+        "or set a default in Buying Settings."
+    )
 
 
 def _detect_country(data: dict) -> str:

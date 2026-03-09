@@ -32,7 +32,7 @@ def create_purchase_receipt(
     Returns:
         Purchase Receipt name
     """
-    items = _build_receipt_items(extracted_data, settings, purchase_order)
+    items = _build_receipt_items(extracted_data, settings, supplier, purchase_order)
     if not items:
         frappe.throw("Cannot create Purchase Receipt without line items")
 
@@ -63,19 +63,22 @@ def create_purchase_receipt(
 
 
 def _build_receipt_items(
-    extracted_data: dict, settings: dict, purchase_order: str | None
+    extracted_data: dict, settings: dict, supplier: str, purchase_order: str | None
 ) -> list[dict]:
     """Build receipt items, optionally linked to a PO."""
     company = settings.get("default_company")
     items = []
 
+    from .purchase_order import _resolve_item, _resolve_uom
+
     for item in extracted_data.get("items", []):
+        item_code = _resolve_item(item, settings, supplier)
         receipt_item = {
-            "item_code": item.get("item_code") or item.get("item_name", "Unknown"),
+            "item_code": item_code,
             "item_name": item.get("item_name", "Unknown Item"),
             "qty": float(item.get("quantity", 1)),
             "rate": float(item.get("unit_price", 0)),
-            "uom": item.get("uom", "Nos"),
+            "uom": _resolve_uom(item.get("uom", "Nos")),
             "warehouse": _get_default_warehouse(company),
         }
 

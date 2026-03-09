@@ -34,24 +34,33 @@ def create_purchase_invoice(
     Returns:
         Purchase Invoice name
     """
-    items = _build_invoice_items(extracted_data, settings, purchase_order, purchase_receipt)
+    items = _build_invoice_items(
+        extracted_data, settings, supplier, purchase_order, purchase_receipt
+    )
     if not items:
         frappe.throw("Cannot create Purchase Invoice without line items")
 
-    pi = frappe.get_doc(
-        {
-            "doctype": "Purchase Invoice",
-            "supplier": supplier,
-            "company": settings.get("default_company"),
-            "posting_date": extracted_data.get("document_date") or today(),
-            "due_date": extracted_data.get("delivery_date") or today(),
-            "bill_no": extracted_data.get("document_number", ""),
-            "bill_date": extracted_data.get("document_date") or today(),
-            "ai_retrospective": 1,
-            "ai_procurement_job": job_name,
-            "items": items,
-        }
-    )
+    pi_data = {
+        "doctype": "Purchase Invoice",
+        "supplier": supplier,
+        "company": settings.get("default_company"),
+        "posting_date": extracted_data.get("document_date") or today(),
+        "due_date": extracted_data.get("delivery_date") or today(),
+        "bill_no": extracted_data.get("document_number", ""),
+        "bill_date": extracted_data.get("document_date") or today(),
+        "ai_retrospective": 1,
+        "ai_procurement_job": job_name,
+        "items": items,
+    }
+
+    # Add tax charges from extracted data
+    from .purchase_order import _build_taxes
+
+    taxes = _build_taxes(extracted_data, settings)
+    if taxes:
+        pi_data["taxes"] = taxes
+
+    pi = frappe.get_doc(pi_data)
 
     # Set payment terms if available
     if extracted_data.get("payment_terms"):
@@ -77,6 +86,7 @@ def create_purchase_invoice(
 def _build_invoice_items(
     extracted_data: dict,
     settings: dict,
+    supplier: str,
     purchase_order: str | None,
     purchase_receipt: str | None,
 ) -> list[dict]:
@@ -84,13 +94,16 @@ def _build_invoice_items(
     company = settings.get("default_company")
     items = []
 
+    from .purchase_order import _resolve_item, _resolve_uom
+
     for item in extracted_data.get("items", []):
+        item_code = _resolve_item(item, settings, supplier)
         invoice_item = {
-            "item_code": item.get("item_code") or item.get("item_name", "Unknown"),
+            "item_code": item_code,
             "item_name": item.get("item_name", "Unknown Item"),
             "qty": float(item.get("quantity", 1)),
             "rate": float(item.get("unit_price", 0)),
-            "uom": item.get("uom", "Nos"),
+            "uom": _resolve_uom(item.get("uom", "Nos")),
             "expense_account": _get_default_expense_account(company),
         }
 

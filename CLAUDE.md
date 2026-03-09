@@ -81,6 +81,43 @@ All are `read_only=1`, `no_copy=1`, `hidden=1`, `print_hide=1`.
 
 Source file is attached to all created documents via Frappe's File attachment system.
 
+### Item Matching (`_resolve_item` in `purchase_order.py`)
+
+All three chain builders (PO, PR, PI) use the same 4-step matching hierarchy:
+
+1. **Supplier + supplier_part_no** — query `Item Supplier` child table for matching `supplier` + `supplier_part_no`, prefer items with `delivered_by_supplier=1`; also accept non-drop-ship if exact match
+2. **Item code + text overlap** — find items with `delivered_by_supplier=1` where ERPNext item_code matches the extracted code, AND at least one keyword from item_name/description overlaps
+3. **Text match** — search any Item by `item_name` LIKE with extracted keywords, score candidates by keyword overlap (requires 2+ keyword matches to accept)
+4. **Create new Item** — creates with `delivered_by_supplier=1`, populates `supplier_items` child table with supplier + `supplier_part_no` from extracted data
+
+Keywords are extracted by tokenizing item_name + description, filtering out words < 3 chars and German/English stopwords, sorted longest-first for specificity.
+
+### ERPNext Default Lookups
+
+All chain builders dynamically query defaults instead of hardcoding names:
+
+| Lookup | Primary Source | Fallback |
+|---|---|---|
+| Supplier Group | `Buying Settings.supplier_group` | First non-group Supplier Group |
+| Item Group | `Stock Settings.item_group` | First non-group Item Group |
+| Warehouse | `Company.default_warehouse` | First non-group Warehouse (filtered by company) |
+| Expense Account | `Company.default_expense_account` | First non-group Expense account (filtered by company) |
+| Tax Account | Default Purchase Taxes and Charges Template | First Tax-type account (filtered by company) |
+
+All throw clear errors if no fallback exists.
+
+### UOM Mapping
+
+German UOM aliases from LLM output are mapped to ERPNext standard UOMs (`_resolve_uom` in `purchase_order.py`): `Stk/Stück` → `Nos`, `kg` → `Kg`, etc. Falls back to `"Nos"` if no match.
+
+### Tax Handling
+
+PO and PI include `Purchase Taxes and Charges` rows built from the per-item `tax_rate` extracted by the LLM. Tax account is resolved from the company's default Purchase Taxes and Charges Template, falling back to the first Tax-type account.
+
+### LLM Amount Convention
+
+Prompts explicitly instruct LLMs to return **NET amounts** (before tax / Netto) for all monetary fields (`unit_price`, `total_price`, `subtotal`, `total_amount`). This matches ERPNext's expectation where tax is applied separately via Tax Templates. The `OutputGuard` plausibility check accepts both net-style (`items + tax = total`) and gross-style (`items = total`) totals without false-flagging.
+
 ### LLM Provider Support
 
 Cloud providers via LangChain: Claude (`langchain-anthropic`), OpenAI (`langchain-openai`), Gemini (`langchain-google-genai`).
@@ -127,3 +164,10 @@ LangGraph, LangChain (anthropic/openai/google-genai), pdfplumber, pytesseract, e
 - Chain builder functions accept `settings: dict` (from `get_settings_dict()`) and use `settings.get("default_company")` for company-scoped queries (warehouse, expense account)
 - Custom fields on standard DocTypes are managed via `fixtures/custom_field.json`, never created programmatically
 - File attachments use Frappe's built-in `File` DocType with `attached_to_doctype`/`attached_to_name`
+- **Never hardcode ERPNext master data names** (Supplier Group, Item Group, Warehouse, Account). Always query defaults from Settings/Company first, then fall back to dynamic lookup, then `frappe.throw()` with a clear message
+- Item matching logic lives in `purchase_order._resolve_item()` and is reused by all three chain builders via import
+- UOM resolution lives in `purchase_order._resolve_uom()` and is reused by all three chain builders via import
+- New items are created with `delivered_by_supplier=1` and linked to the supplier via `supplier_items` child table
+- LLM extraction uses NET amounts; tax is added separately via `Purchase Taxes and Charges` rows on PO/PI
+- `frappe.enqueue()` parameter naming: use `procurement_job_name` (not `job_name`) to avoid collision with frappe's reserved `job_name` parameter
+- `get_password()` calls must use `raise_exception=False` for optional API key fields

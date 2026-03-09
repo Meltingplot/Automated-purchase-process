@@ -5,11 +5,46 @@ Purchase Order creation from extracted data.
 from __future__ import annotations
 
 import logging
+import re
 
 import frappe
 from frappe.utils import today
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Input sanitization — LLM-sourced data is cleaned before use
+# in any database query or document creation.
+# ============================================================
+
+
+def _sanitize_text(value: str, max_len: int = 200) -> str:
+    """
+    Sanitize a free-text field from LLM output.
+
+    Strips null bytes, control characters, and excessive whitespace.
+    Truncates to max_len.
+    """
+    if not isinstance(value, str):
+        return ""
+    # Strip null bytes and control chars (keep printable + common unicode)
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", value)
+    # Collapse whitespace
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:max_len]
+
+
+def _sanitize_code(value: str) -> str:
+    """
+    Sanitize an item_code / supplier_part_no from LLM output.
+
+    Allows only alphanumeric, hyphens, dots, underscores, spaces.
+    """
+    if not isinstance(value, str):
+        return ""
+    cleaned = re.sub(r"[^\w\s.\-]", "", value).strip()
+    return cleaned[:140]
 
 
 def create_purchase_order(
@@ -30,23 +65,27 @@ def create_purchase_order(
     Returns:
         Purchase Order name
     """
-    items = _build_items(extracted_data, settings)
+    items = _build_items(extracted_data, settings, supplier)
     if not items:
         frappe.throw("Cannot create Purchase Order without line items")
 
-    po = frappe.get_doc(
-        {
-            "doctype": "Purchase Order",
-            "supplier": supplier,
-            "company": settings.get("default_company"),
-            "transaction_date": extracted_data.get("document_date") or today(),
-            "schedule_date": extracted_data.get("delivery_date") or today(),
-            "ai_retrospective": 1,
-            "ai_procurement_job": job_name,
-            "items": items,
-        }
-    )
+    po_data = {
+        "doctype": "Purchase Order",
+        "supplier": supplier,
+        "company": settings.get("default_company"),
+        "transaction_date": extracted_data.get("document_date") or today(),
+        "schedule_date": extracted_data.get("delivery_date") or today(),
+        "ai_retrospective": 1,
+        "ai_procurement_job": job_name,
+        "items": items,
+    }
 
+    # Add tax charges from extracted data
+    taxes = _build_taxes(extracted_data, settings)
+    if taxes:
+        po_data["taxes"] = taxes
+
+    po = frappe.get_doc(po_data)
     po.insert(ignore_permissions=True)
     po.add_comment(
         "Comment",
@@ -61,20 +100,20 @@ def create_purchase_order(
     return po.name
 
 
-def _build_items(extracted_data: dict, settings: dict) -> list[dict]:
+def _build_items(extracted_data: dict, settings: dict, supplier: str = "") -> list[dict]:
     """Build PO items list from extracted line items."""
     items = []
     schedule_date = extracted_data.get("delivery_date") or today()
 
     for item in extracted_data.get("items", []):
-        item_code = _resolve_item(item, settings)
+        item_code = _resolve_item(item, settings, supplier)
         items.append(
             {
                 "item_code": item_code,
                 "item_name": item.get("item_name", "Unknown Item"),
                 "qty": float(item.get("quantity", 1)),
                 "rate": float(item.get("unit_price", 0)),
-                "uom": item.get("uom", "Nos"),
+                "uom": _resolve_uom(item.get("uom", "Nos")),
                 "schedule_date": schedule_date,
             }
         )
@@ -82,52 +121,369 @@ def _build_items(extracted_data: dict, settings: dict) -> list[dict]:
     return items
 
 
-def _resolve_item(item: dict, settings: dict) -> str:
+def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
+    """Build Purchase Taxes and Charges from extracted tax info."""
+    # Collect tax rates from items
+    tax_rates = set()
+    for item in extracted_data.get("items", []):
+        rate = item.get("tax_rate")
+        if rate is not None:
+            try:
+                tax_rates.add(float(rate))
+            except (TypeError, ValueError):
+                pass
+
+    if not tax_rates:
+        return []
+
+    company = settings.get("default_company")
+    tax_account = _get_tax_account(company)
+    if not tax_account:
+        return []
+
+    taxes = []
+    for rate in sorted(tax_rates):
+        if rate <= 0:
+            continue
+        taxes.append(
+            {
+                "charge_type": "On Net Total",
+                "account_head": tax_account,
+                "rate": rate,
+                "description": f"VAT {rate:.1f}%",
+            }
+        )
+
+    return taxes
+
+
+def _get_tax_account(company: str) -> str | None:
+    """Find the tax account for the company."""
+    if not company:
+        return None
+
+    # Check if there's a default Purchase Taxes and Charges Template
+    # and get its account
+    default_template = frappe.db.get_value(
+        "Purchase Taxes and Charges Template",
+        {"company": company, "is_default": 1},
+        "name",
+    )
+    if default_template:
+        accounts = frappe.get_all(
+            "Purchase Taxes and Charges",
+            filters={"parent": default_template},
+            fields=["account_head"],
+            limit=1,
+        )
+        if accounts:
+            return accounts[0]["account_head"]
+
+    # Fall back to first tax account for the company
+    accounts = frappe.get_all(
+        "Account",
+        filters={
+            "account_type": "Tax",
+            "is_group": 0,
+            "company": company,
+        },
+        fields=["name"],
+        limit=1,
+        order_by="creation asc",
+    )
+    if accounts:
+        return accounts[0]["name"]
+
+    logger.warning(f"No tax account found for company {company!r}")
+    return None
+
+
+# Common German UOM aliases → ERPNext standard UOM names
+_UOM_MAP = {
+    "stk": "Nos",
+    "stück": "Nos",
+    "stk.": "Nos",
+    "pcs": "Nos",
+    "pc": "Nos",
+    "ea": "Nos",
+    "kg": "Kg",
+    "g": "Gram",
+    "l": "Liter",
+    "m": "Meter",
+    "km": "Km",
+}
+
+
+def _resolve_uom(uom: str) -> str:
+    """Map LLM-extracted UOM to a valid ERPNext UOM."""
+    if not uom:
+        return "Nos"
+
+    # Check if UOM exists in ERPNext as-is
+    if frappe.db.exists("UOM", uom):
+        return uom
+
+    # Try mapping
+    mapped = _UOM_MAP.get(uom.lower().strip())
+    if mapped and frappe.db.exists("UOM", mapped):
+        return mapped
+
+    return "Nos"
+
+
+def _get_default_item_group() -> str:
+    """Get the default or first available Item Group."""
+    # Try Stock Settings default
+    default = frappe.db.get_single_value("Stock Settings", "item_group")
+    if default:
+        return default
+
+    # Fall back to first non-group Item Group
+    groups = frappe.get_all(
+        "Item Group",
+        filters={"is_group": 0},
+        fields=["name"],
+        order_by="lft asc",
+        limit=1,
+    )
+    if groups:
+        return groups[0]["name"]
+
+    # Last resort: first Item Group of any kind
+    groups = frappe.get_all(
+        "Item Group",
+        fields=["name"],
+        order_by="lft asc",
+        limit=1,
+    )
+    if groups:
+        return groups[0]["name"]
+
+    frappe.throw(
+        "No Item Group found. Please create at least one Item Group "
+        "or set a default in Stock Settings."
+    )
+
+
+def _resolve_item(item: dict, settings: dict, supplier: str = "") -> str:
     """
     Find or create an ERPNext Item matching the extracted item.
 
-    Searches by item_name. Creates as Draft if not found.
-    """
-    item_name = item.get("item_name", "Unknown Item")
+    All inputs are sanitized before use in queries since the data
+    originates from LLM extraction of potentially adversarial documents.
 
-    # Search for existing item
-    existing = frappe.get_all(
-        "Item",
-        filters={"item_name": ["like", f"%{item_name[:50]}%"]},
-        fields=["name", "item_name"],
+    Matching hierarchy:
+    1. Item with delivered_by_supplier + Item Supplier row matching
+       supplier AND supplier_part_no
+    2. Item with delivered_by_supplier + item_code match + text overlap
+       in item_name or description
+    3. Any Item where item_name or description has text overlap
+    4. Create new Item
+    """
+    extracted_code = _sanitize_code(item.get("item_code", ""))
+    extracted_name = _sanitize_text(item.get("item_name", "Unknown Item"), max_len=140)
+    extracted_desc = _sanitize_text(item.get("description", ""), max_len=500)
+
+    # Step 1: delivered_by_supplier + supplier + supplier_part_no match
+    if supplier and extracted_code:
+        match = _match_by_supplier_part_no(supplier, extracted_code)
+        if match:
+            logger.info(
+                f"Item matched via supplier_part_no: {match} "
+                f"(supplier={supplier}, part_no={extracted_code})"
+            )
+            return match
+
+    # Step 2: delivered_by_supplier + item_code match + text overlap
+    if extracted_code:
+        match = _match_by_code_and_text(
+            extracted_code, extracted_name, extracted_desc
+        )
+        if match:
+            logger.info(
+                f"Item matched via item_code + text overlap: {match} "
+                f"(code={extracted_code})"
+            )
+            return match
+
+    # Step 3: Text match on item_name or description
+    match = _match_by_text(extracted_name, extracted_desc)
+    if match:
+        logger.info(
+            f"Item matched via text similarity: {match} "
+            f"(name={extracted_name!r})"
+        )
+        return match
+
+    # Step 4: Create new item
+    return _create_item(item, supplier, settings)
+
+
+def _match_by_supplier_part_no(supplier: str, supplier_part_no: str) -> str | None:
+    """
+    Step 1: Find Item with delivered_by_supplier=1 that has an Item Supplier
+    row matching the supplier and supplier_part_no.
+    """
+    matches = frappe.get_all(
+        "Item Supplier",
+        filters={
+            "supplier": supplier,
+            "supplier_part_no": supplier_part_no,
+        },
+        fields=["parent"],
         limit=5,
     )
 
-    if existing:
-        return existing[0]["name"]
-
-    # Search by item_code if provided
-    if item.get("item_code"):
-        existing = frappe.get_all(
-            "Item",
-            filters={"name": item["item_code"]},
-            fields=["name"],
-            limit=1,
+    for m in matches:
+        is_drop_ship = frappe.db.get_value(
+            "Item", m["parent"], "delivered_by_supplier"
         )
-        if existing:
-            return existing[0]["name"]
+        if is_drop_ship:
+            return m["parent"]
 
-    # Create new item
+    # Also accept non-drop-ship if supplier + part_no match exactly
+    if matches:
+        return matches[0]["parent"]
+
+    return None
+
+
+def _match_by_code_and_text(
+    item_code: str, item_name: str, description: str
+) -> str | None:
+    """
+    Step 2: Find Item with delivered_by_supplier=1 where item_code matches
+    AND at least one keyword from item_name/description overlaps.
+    """
+    # Search by item_code (ERPNext Item.name = item_code)
+    candidates = frappe.get_all(
+        "Item",
+        filters={
+            "name": item_code,
+            "delivered_by_supplier": 1,
+        },
+        fields=["name", "item_name", "description"],
+        limit=5,
+    )
+
+    if not candidates:
+        return None
+
+    keywords = _extract_keywords(item_name, description)
+    if not keywords:
+        # No keywords to match, but code matched exactly
+        return candidates[0]["name"]
+
+    for c in candidates:
+        candidate_text = f"{c.get('item_name', '')} {c.get('description', '')}".lower()
+        if any(kw in candidate_text for kw in keywords):
+            return c["name"]
+
+    return None
+
+
+def _match_by_text(item_name: str, description: str) -> str | None:
+    """
+    Step 3: Find any Item where item_name or description has text overlap
+    with the extracted item_name or description.
+    """
+    keywords = _extract_keywords(item_name, description)
+    if not keywords:
+        return None
+
+    # Try each keyword as a LIKE search on item_name, pick best match
+    for kw in keywords:
+        # Search item_name first (more specific)
+        matches = frappe.get_all(
+            "Item",
+            filters={"item_name": ["like", f"%{kw}%"]},
+            fields=["name", "item_name", "description"],
+            limit=10,
+        )
+
+        if not matches:
+            continue
+
+        # Score candidates by how many keywords they contain
+        best_match = None
+        best_score = 0
+        for m in matches:
+            candidate_text = (
+                f"{m.get('item_name', '')} {m.get('description', '')}"
+            ).lower()
+            score = sum(1 for k in keywords if k in candidate_text)
+            if score > best_score:
+                best_score = score
+                best_match = m["name"]
+
+        if best_match and best_score >= 2:
+            return best_match
+
+    return None
+
+
+def _extract_keywords(item_name: str, description: str) -> list[str]:
+    """
+    Extract meaningful keywords from item name and description.
+
+    Filters out short words (<3 chars) and common German/English stopwords.
+    Returns lowercase keywords sorted by length (longest first, more specific).
+    """
+    import re
+
+    stopwords = {
+        "für", "und", "mit", "von", "des", "den", "dem", "der", "die", "das",
+        "ein", "eine", "the", "and", "for", "with", "from",
+    }
+
+    text = f"{item_name or ''} {description or ''}"
+    words = re.findall(r"[a-zA-Z0-9äöüÄÖÜß]+", text.lower())
+    keywords = [
+        w for w in words if len(w) >= 3 and w not in stopwords
+    ]
+
+    # Deduplicate, sort longest first (more specific = better match)
+    seen = set()
+    unique = []
+    for kw in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            unique.append(kw)
+
+    return sorted(unique, key=len, reverse=True)
+
+
+def _create_item(item: dict, supplier: str, settings: dict) -> str:
+    """Create a new ERPNext Item and optionally link it to the supplier."""
+    item_name = _sanitize_text(item.get("item_name", "Unknown Item"), max_len=140)
+    item_desc = _sanitize_text(item.get("description", item_name), max_len=500)
+    item_code = _sanitize_code(item.get("item_code", ""))
+    uom = _resolve_uom(item.get("uom", "Nos"))
+
     new_item = frappe.get_doc(
         {
             "doctype": "Item",
             "item_name": item_name,
-            "item_group": "All Item Groups",
-            "stock_uom": item.get("uom", "Nos"),
+            "item_group": _get_default_item_group(),
+            "stock_uom": uom,
             "is_stock_item": 0,
-            "description": item.get("description", item_name),
+            "delivered_by_supplier": 1 if supplier else 0,
+            "description": item_desc,
         }
     )
+
+    # Add supplier link with supplier_part_no if available
+    if supplier:
+        supplier_row = {"supplier": supplier}
+        if item_code:
+            supplier_row["supplier_part_no"] = item_code
+        new_item.append("supplier_items", supplier_row)
+
     new_item.insert(ignore_permissions=True)
     new_item.add_comment(
         "Comment",
         "Automatically created by AI Procurement Plugin",
     )
 
-    logger.info(f"Created new Item: {new_item.name}")
+    logger.info(f"Created new Item: {new_item.name} (supplier: {supplier})")
     return new_item.name

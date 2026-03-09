@@ -106,19 +106,35 @@ class OutputGuard:
         """Run arithmetic and logical plausibility checks."""
         errors: list[str] = []
 
-        # Sum check: line items vs total
+        # Sum check: line items vs totals
         if doc.items and doc.total_amount:
-            calc_total = sum(item.total_price for item in doc.items)
-            if doc.shipping_cost:
-                calc_total += doc.shipping_cost
-            if doc.tax_amount:
-                calc_total += doc.tax_amount
+            items_sum = sum(float(item.total_price) for item in doc.items)
+            total = float(doc.total_amount)
+            tax = float(doc.tax_amount) if doc.tax_amount else 0.0
+            shipping = float(doc.shipping_cost) if doc.shipping_cost else 0.0
 
-            diff = abs(float(calc_total) - float(doc.total_amount))
-            if diff > 0.05:  # 5 cent tolerance
+            # Check if items are net (items + tax + shipping ≈ total)
+            net_total = items_sum + tax + shipping
+            net_ok = abs(net_total - total) <= 0.05
+
+            # Check if items are gross (items + shipping ≈ total, tax included)
+            gross_ok = abs(items_sum + shipping - total) <= 0.05
+
+            if not net_ok and not gross_ok:
                 errors.append(
-                    f"Total mismatch: calculated={calc_total}, "
-                    f"stated={doc.total_amount}, diff={diff:.2f}"
+                    f"Total mismatch: item_sum={items_sum:.2f}, "
+                    f"tax={tax:.2f}, total={total:.2f}"
+                )
+
+        # Subtotal vs item sum consistency
+        if doc.items and doc.subtotal:
+            items_sum = sum(float(item.total_price) for item in doc.items)
+            subtotal = float(doc.subtotal)
+            # Items sum should match subtotal (both net or both gross)
+            if abs(items_sum - subtotal) > 0.05:
+                errors.append(
+                    f"Subtotal mismatch: item_sum={items_sum:.2f}, "
+                    f"subtotal={subtotal:.2f}"
                 )
 
         # Line item internal consistency
