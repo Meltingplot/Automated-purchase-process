@@ -19,6 +19,7 @@ def create_purchase_receipt(
     job_name: str,
     purchase_order: str | None = None,
     po_item_links: dict | None = None,
+    item_mapping: dict | None = None,
 ) -> str:
     """
     Create a Purchase Receipt from extracted document data.
@@ -36,7 +37,8 @@ def create_purchase_receipt(
         Purchase Receipt name
     """
     items = _build_receipt_items(
-        extracted_data, settings, supplier, purchase_order, po_item_links
+        extracted_data, settings, supplier, purchase_order, po_item_links,
+        item_mapping=item_mapping,
     )
     if not items:
         frappe.throw("Cannot create Purchase Receipt without line items")
@@ -73,6 +75,7 @@ def _build_receipt_items(
     supplier: str,
     purchase_order: str | None,
     po_item_links: dict | None = None,
+    item_mapping: dict | None = None,
 ) -> list[dict]:
     """Build receipt items, optionally linked to a PO with item-level links."""
     company = settings.get("default_company")
@@ -81,7 +84,8 @@ def _build_receipt_items(
     from .purchase_order import _resolve_item, _resolve_uom
 
     for idx, item in enumerate(extracted_data.get("items", [])):
-        item_code = _resolve_item(item, settings, supplier)
+        mapped_code = item_mapping.get(idx) if item_mapping else None
+        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
         receipt_item = {
             "item_code": item_code,
             "item_name": item.get("item_name", "Unknown Item"),

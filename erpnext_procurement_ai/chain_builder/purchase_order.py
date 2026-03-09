@@ -52,6 +52,7 @@ def create_purchase_order(
     supplier: str,
     settings: dict,
     job_name: str,
+    item_mapping: dict | None = None,
 ) -> str:
     """
     Create a Purchase Order from extracted document data.
@@ -65,7 +66,7 @@ def create_purchase_order(
     Returns:
         Purchase Order name
     """
-    items = _build_items(extracted_data, settings, supplier)
+    items = _build_items(extracted_data, settings, supplier, item_mapping=item_mapping)
     if not items:
         frappe.throw("Cannot create Purchase Order without line items")
 
@@ -105,13 +106,19 @@ def create_purchase_order(
     return po.name
 
 
-def _build_items(extracted_data: dict, settings: dict, supplier: str = "") -> list[dict]:
+def _build_items(
+    extracted_data: dict,
+    settings: dict,
+    supplier: str = "",
+    item_mapping: dict | None = None,
+) -> list[dict]:
     """Build PO items list from extracted line items."""
     items = []
     schedule_date = extracted_data.get("delivery_date") or today()
 
-    for item in extracted_data.get("items", []):
-        item_code = _resolve_item(item, settings, supplier)
+    for idx, item in enumerate(extracted_data.get("items", [])):
+        mapped_code = item_mapping.get(idx) if item_mapping else None
+        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier)
         items.append(
             {
                 "item_code": item_code,
@@ -297,7 +304,7 @@ def _try_resolve_item(item: dict, settings: dict, supplier: str = "") -> str | N
             return match
 
     # Step 3: Text match on item_name or description
-    match = _match_by_text(extracted_name, extracted_desc)
+    match = _match_by_text(extracted_name, extracted_desc, supplier, extracted_code)
     if match:
         return match
 
@@ -391,10 +398,19 @@ def _match_by_code_and_text(
     return None
 
 
-def _match_by_text(item_name: str, description: str) -> str | None:
+def _match_by_text(
+    item_name: str,
+    description: str,
+    supplier: str = "",
+    extracted_code: str = "",
+) -> str | None:
     """
     Step 3: Find any Item where item_name or description has text overlap
     with the extracted item_name or description.
+
+    If the extracted item has a supplier_part_no, reject candidates that
+    already have a *different* supplier_part_no for the same supplier
+    (they are different products with similar names).
     """
     keywords = _extract_keywords(item_name, description)
     if not keywords:
@@ -417,6 +433,11 @@ def _match_by_text(item_name: str, description: str) -> str | None:
         best_match = None
         best_score = 0
         for m in matches:
+            # Reject if candidate has a different supplier_part_no for same supplier
+            if supplier and extracted_code:
+                if _has_conflicting_supplier_part(m["name"], supplier, extracted_code):
+                    continue
+
             candidate_text = (
                 f"{m.get('item_name', '')} {m.get('description', '')}"
             ).lower()
@@ -429,6 +450,24 @@ def _match_by_text(item_name: str, description: str) -> str | None:
             return best_match
 
     return None
+
+
+def _has_conflicting_supplier_part(
+    item_name: str, supplier: str, extracted_code: str
+) -> bool:
+    """
+    Check if an Item already has a supplier_part_no for this supplier
+    that differs from extracted_code. If so, it's a different product.
+    """
+    existing = frappe.get_all(
+        "Item Supplier",
+        filters={"parent": item_name, "supplier": supplier},
+        fields=["supplier_part_no"],
+        limit=1,
+    )
+    if not existing:
+        return False
+    return existing[0].get("supplier_part_no", "") != extracted_code
 
 
 def _extract_keywords(item_name: str, description: str) -> list[str]:

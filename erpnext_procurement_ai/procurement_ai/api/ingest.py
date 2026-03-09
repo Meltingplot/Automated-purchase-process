@@ -188,9 +188,27 @@ def run_extraction_pipeline(procurement_job_name: str):
             )
             return
 
-        # Step 5: Build document chain
+        # Step 4b: Pause for human review if enabled
         consensus_data = result.get("validated_data") or result.get("consensus") or {}
         source_type = result.get("source_type_hint", "Invoice")
+
+        if settings.get("require_document_review"):
+            job.status = "Awaiting Review"
+            job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
+            job.consensus_data = json.dumps(consensus_data)
+            job.detected_type = _validate_source_type(source_type)
+            job.save()
+            frappe.db.commit()
+
+            frappe.publish_realtime(
+                "ai_procurement_progress",
+                {"job": job_name, "stage": "awaiting_review"},
+                doctype="AI Procurement Job",
+                docname=job_name,
+            )
+            return
+
+        # Step 5: Build document chain
         source_file_url = job.source_document_url or job.source_document
 
         from ...chain_builder.retrospective import RetrospectiveChainBuilder
@@ -205,28 +223,123 @@ def run_extraction_pipeline(procurement_job_name: str):
         )
 
         # Step 6: Update job with results
-        job.status = "Completed"
-        job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
-        job.consensus_data = json.dumps(consensus_data)
-        job.detected_type = _validate_source_type(source_type)
-        job.created_supplier = created.get("supplier")
-        job.created_po = created.get("purchase_order")
-        job.created_receipt = created.get("purchase_receipt")
-        job.created_invoice = created.get("purchase_invoice")
-        job.save()
-        frappe.db.commit()
-
-        frappe.publish_realtime(
-            "ai_procurement_progress",
-            {"job": job_name, "stage": "completed"},
-            doctype="AI Procurement Job",
-            docname=job_name,
-        )
+        _complete_job(job, result, consensus_data, source_type, created)
 
         logger.info(f"Job {job_name}: Pipeline completed successfully")
 
     except Exception as e:
         logger.error(f"Job {job_name}: Pipeline error: {e}\n{traceback.format_exc()}")
+
+        try:
+            job = frappe.get_doc("AI Procurement Job", job_name)
+            job.status = "Error"
+            job.escalation_reason = str(e)[:2000]
+            job.save()
+            frappe.db.commit()
+        except Exception:
+            pass
+
+        frappe.publish_realtime(
+            "ai_procurement_progress",
+            {"job": job_name, "stage": "error", "error": str(e)},
+            doctype="AI Procurement Job",
+            docname=job_name,
+        )
+
+
+def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, source_type: str, created: dict):
+    """Update job with final results and auto-resolve any open escalations."""
+    job_name = job.name
+    confidence = 0.0
+    if pipeline_result:
+        confidence = float(pipeline_result.get("confidence", 0.0) or 0.0)
+    elif job.confidence_score:
+        confidence = float(job.confidence_score)
+
+    job.status = "Completed"
+    job.confidence_score = confidence
+    job.consensus_data = json.dumps(consensus_data)
+    job.detected_type = _validate_source_type(source_type)
+    job.created_supplier = created.get("supplier")
+    job.created_po = created.get("purchase_order")
+    job.created_receipt = created.get("purchase_receipt")
+    job.created_invoice = created.get("purchase_invoice")
+    job.save()
+    frappe.db.commit()
+
+    # Auto-resolve open escalations for this job
+    open_escalations = frappe.get_all(
+        "AI Escalation Log",
+        filters={"procurement_job": job_name, "status": "Open"},
+        fields=["name"],
+    )
+    for esc in open_escalations:
+        frappe.db.set_value(
+            "AI Escalation Log", esc["name"],
+            {"status": "Resolved", "resolution_action": "Approved as-is"},
+        )
+
+    frappe.publish_realtime(
+        "ai_procurement_progress",
+        {"job": job_name, "stage": "completed"},
+        doctype="AI Procurement Job",
+        docname=job_name,
+    )
+
+
+def run_chain_from_review(procurement_job_name: str):
+    """
+    Background job: Build document chain from reviewed data.
+
+    Called after user approves the review form. Uses reviewed_data
+    (falls back to consensus_data) and item_mapping from the job.
+    """
+    job_name = procurement_job_name
+    try:
+        job = frappe.get_doc("AI Procurement Job", job_name)
+
+        # Get settings
+        settings_doc = frappe.get_single("AI Procurement Settings")
+        settings = settings_doc.get_settings_dict()
+
+        # Use reviewed data if available, otherwise fall back to consensus
+        if job.reviewed_data:
+            consensus_data = json.loads(job.reviewed_data)
+        else:
+            consensus_data = json.loads(job.consensus_data or "{}")
+
+        # Parse item_mapping (JSON: {"0": "ITEM-001", "1": null, ...})
+        item_mapping = None
+        if job.item_mapping:
+            raw_mapping = json.loads(job.item_mapping)
+            # Convert string keys to int, skip null/empty values
+            item_mapping = {
+                int(k): v for k, v in raw_mapping.items()
+                if v
+            }
+            if not item_mapping:
+                item_mapping = None
+
+        source_type = job.detected_type or "Invoice"
+        source_file_url = job.source_document_url or job.source_document
+
+        from ...chain_builder.retrospective import RetrospectiveChainBuilder
+
+        builder = RetrospectiveChainBuilder()
+        created = builder.build_chain(
+            extracted_data=consensus_data,
+            source_type=source_type,
+            source_file_url=source_file_url,
+            settings=settings,
+            job_name=job_name,
+            item_mapping=item_mapping,
+        )
+
+        _complete_job(job, None, consensus_data, source_type, created)
+        logger.info(f"Job {job_name}: Chain from review completed successfully")
+
+    except Exception as e:
+        logger.error(f"Job {job_name}: Chain from review error: {e}\n{traceback.format_exc()}")
 
         try:
             job = frappe.get_doc("AI Procurement Job", job_name)

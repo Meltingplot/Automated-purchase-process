@@ -37,9 +37,22 @@ Upload (PDF/Image/Email)
   -> OutputGuard (JSON extraction, Pydantic validation, plausibility checks)
   -> ConsensusEngine (field-by-field majority voting, OCR cross-check)
   -> Validation (confidence threshold, required fields)
+  -> [if require_document_review] Human Review UI (edit fields, map items)
   -> RetrospectiveChainBuilder (Supplier -> PO -> PR -> PI)
   -> Attach source file to created documents
 ```
+
+### Document Review Workflow
+
+When `require_document_review` is enabled in Settings (default: on), the pipeline pauses after LLM extraction and consensus, entering the **Awaiting Review** status. The user sees:
+
+- **Header fields** — editable inputs for all extracted fields (supplier, dates, amounts, etc.) with per-field confidence badges (N/M agreement across LLM providers)
+- **Items table** — editable rows for each line item with a "Map to Item" Link control to manually select an existing ERPNext Item (bypasses `_resolve_item` fuzzy matching)
+- **Approve & Create Documents** button — saves `reviewed_data` + `item_mapping` JSON, triggers `run_chain_from_review()` background job
+
+The `item_mapping` parameter flows through `RetrospectiveChainBuilder.build_chain()` into all three chain builders (`_build_items`, `_build_receipt_items`, `_build_invoice_items`). When an item index has a mapped item_code, `_resolve_item()` is skipped entirely for that item.
+
+When `require_document_review` is disabled, the pipeline auto-creates documents as before (no pause).
 
 ### Module Layout
 
@@ -58,7 +71,7 @@ Upload (PDF/Image/Email)
 
 ### DocTypes
 
-- **AI Procurement Job** (`AIPROC-####`): Central job record. Tracks status (Pending/Processing/Needs Review/Completed/Error), stores OCR text, extraction results (child table), consensus data, confidence score, and links to created Supplier/PO/PR/PI.
+- **AI Procurement Job** (`AIPROC-####`): Central job record. Tracks status (Pending/Processing/Awaiting Review/Needs Review/Completed/Error), stores OCR text, extraction results (child table), consensus data, confidence score, reviewed_data (user-corrected JSON), item_mapping (user-selected Item codes), and links to created Supplier/PO/PR/PI. Deletion clears `ai_procurement_job` back-references on linked PO/PR/PI via `on_trash`.
 - **AI Extraction Result**: Child table of Job. One row per LLM provider with extracted_data JSON, confidence, timing, token count, deviation fields.
 - **AI Procurement Settings** (Single): All configuration -- API keys (Password fields), LLM provider settings, OCR engine choice, confidence threshold, auto-submit toggle, escalation email, local LLM config (provider/URL/model/trust level).
 - **AI Escalation Log** (`ESC-####`): Created when consensus fails. Types: Low Confidence, Field Dispute, Amount Mismatch, Supplier Unclear, OCR Mismatch, Processing Error.

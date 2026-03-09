@@ -14,6 +14,7 @@
         "min_llm_consensus",
         "max_parallel_llms",
         "auto_submit_documents",
+        "require_document_review",
         "escalation_email",
         "cloud_llm_section",
         "claude_api_key",
@@ -97,6 +98,13 @@
             "fieldtype": "Check",
             "label": "Auto Submit Documents",
             "description": "Automatically submit created documents (otherwise saved as Draft)"
+        },
+        {
+            "default": "1",
+            "fieldname": "require_document_review",
+            "fieldtype": "Check",
+            "label": "Require Document Review",
+            "description": "Show extracted data for human review before creating documents"
         },
         {
             "fieldname": "escalation_email",

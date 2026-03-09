@@ -45,7 +45,7 @@ def get_dashboard_stats() -> dict:
 
     # Status counts
     status_counts = {}
-    for status in ["Pending", "Processing", "Needs Review", "Completed", "Error"]:
+    for status in ["Pending", "Processing", "Awaiting Review", "Needs Review", "Completed", "Error"]:
         count = frappe.db.count(
             "AI Procurement Job", filters={"status": status}
         )

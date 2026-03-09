@@ -57,6 +57,7 @@ class RetrospectiveChainBuilder:
         source_file_url: str,
         settings: dict,
         job_name: str,
+        item_mapping: dict | None = None,
     ) -> dict:
         """
         Find or create the full document chain from extracted data.
@@ -74,6 +75,8 @@ class RetrospectiveChainBuilder:
             source_file_url: Frappe File URL of the source document
             settings: Plugin settings
             job_name: AI Procurement Job name
+            item_mapping: Optional user-reviewed mapping of item index to
+                          ERPNext Item code. Skips _resolve_item for mapped items.
 
         Returns:
             Dict with links to all created/matched documents + attachments.
@@ -126,6 +129,7 @@ class RetrospectiveChainBuilder:
                     supplier=supplier,
                     settings=settings,
                     job_name=job_name,
+                    item_mapping=item_mapping,
                 )
                 result["purchase_order"] = po_name
                 result["purchase_order_matched"] = False
@@ -165,6 +169,7 @@ class RetrospectiveChainBuilder:
                     job_name=job_name,
                     purchase_order=result.get("purchase_order"),
                     po_item_links=po_item_links,
+                    item_mapping=item_mapping,
                 )
                 result["purchase_receipt"] = pr_name
                 result["purchase_receipt_matched"] = False
@@ -206,6 +211,7 @@ class RetrospectiveChainBuilder:
                     purchase_receipt=result.get("purchase_receipt"),
                     po_item_links=po_item_links,
                     pr_item_links=pr_item_links,
+                    item_mapping=item_mapping,
                 )
                 result["purchase_invoice"] = pi_name
                 result["purchase_invoice_matched"] = False

@@ -45,6 +45,7 @@ function render_stats(page, data) {
     var status_config = [
         { key: "Pending", color: "orange", icon: "clock" },
         { key: "Processing", color: "blue", icon: "refresh" },
+        { key: "Awaiting Review", color: "cyan", icon: "eye" },
         { key: "Needs Review", color: "yellow", icon: "alert-circle" },
         { key: "Completed", color: "green", icon: "check" },
         { key: "Error", color: "red", icon: "x" },
@@ -80,6 +81,7 @@ function render_recent_jobs(page, jobs) {
             var color_map = {
                 Pending: "orange",
                 Processing: "blue",
+                "Awaiting Review": "cyan",
                 "Needs Review": "yellow",
                 Completed: "green",
                 Error: "red",
