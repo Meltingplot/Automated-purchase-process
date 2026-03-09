@@ -105,10 +105,12 @@ def _build_receipt_items(
 
 def _get_default_warehouse(company: str) -> str:
     """Get the default warehouse for receiving goods."""
-    # Try Stock Settings default first
+    # Try Stock Settings default, but only if it belongs to the right company
     default = frappe.db.get_single_value("Stock Settings", "default_warehouse")
     if default:
-        return default
+        wh_company = frappe.db.get_value("Warehouse", default, "company")
+        if not company or wh_company == company:
+            return default
 
     # Fall back to first non-group warehouse for the company
     filters = {"is_group": 0}
