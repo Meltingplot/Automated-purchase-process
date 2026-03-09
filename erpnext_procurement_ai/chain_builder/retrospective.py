@@ -5,6 +5,10 @@ Creates the full ERPNext procurement chain from any entry point.
 If you upload an invoice, it creates the missing PO and Receipt.
 If you upload a delivery note, it creates the missing PO.
 
+Uses "find before create" logic: attempts to match existing documents
+before creating new ones, avoiding duplicates when a user already has
+manually-created documents.
+
 All created documents are marked as retrospective and linked
 to the AI Procurement Job.
 """
@@ -15,6 +19,12 @@ import logging
 import re
 
 from .attachments import attach_source_to_chain
+from .document_matcher import (
+    build_item_links,
+    find_matching_purchase_invoice,
+    find_matching_purchase_order,
+    find_matching_purchase_receipt,
+)
 from .purchase_invoice import create_purchase_invoice
 from .purchase_order import create_purchase_order
 from .purchase_receipt import create_purchase_receipt
@@ -37,7 +47,7 @@ class RetrospectiveChainBuilder:
     Builds the complete procurement document chain.
 
     Entry point can be any document type. Missing documents
-    in the chain are created retrospectively.
+    in the chain are found (if existing) or created retrospectively.
     """
 
     def build_chain(
@@ -49,7 +59,11 @@ class RetrospectiveChainBuilder:
         job_name: str,
     ) -> dict:
         """
-        Create the full document chain from extracted data.
+        Find or create the full document chain from extracted data.
+
+        Uses "find before create" logic: for each document in the chain,
+        first attempts to match an existing document. Only creates a new
+        one if no match is found.
 
         All LLM-sourced data is sanitized at this entry point before
         reaching any database query or document write downstream.
@@ -62,16 +76,17 @@ class RetrospectiveChainBuilder:
             job_name: AI Procurement Job name
 
         Returns:
-            Dict with links to all created documents + attachments
+            Dict with links to all created/matched documents + attachments.
+            Includes *_matched flags to distinguish matched vs created docs.
         """
         # Sanitize all LLM-sourced data before any DB interaction
         extracted_data = sanitize_extracted_data(extracted_data)
 
-        created: dict = {}
+        result: dict = {}
 
         # 1. Ensure supplier exists
         supplier = ensure_supplier(extracted_data)
-        created["supplier"] = supplier
+        result["supplier"] = supplier
 
         # 2. Determine which docs are needed
         needed = NEEDED_DOCS.get(source_type, [])
@@ -80,49 +95,149 @@ class RetrospectiveChainBuilder:
             f"needed docs: {needed}"
         )
 
-        # 3. Create docs in order
+        # Track item links for downstream documents
+        po_item_links: dict | None = None
+        pr_item_links: dict | None = None
+
+        # Track which docs were newly created (for attachment logic)
+        created_doc_keys: set[str] = set()
+
+        # 3. Find or create docs in order
         if "Purchase Order" in needed:
-            po_name = create_purchase_order(
-                extracted_data=extracted_data,
+            po_match = find_matching_purchase_order(
                 supplier=supplier,
+                extracted_data=extracted_data,
                 settings=settings,
-                job_name=job_name,
             )
-            created["purchase_order"] = po_name
+            if po_match.found:
+                result["purchase_order"] = po_match.doc_name
+                result["purchase_order_matched"] = True
+                result["purchase_order_match_method"] = po_match.match_method
+                result["purchase_order_match_confidence"] = po_match.match_confidence
+                po_item_links = po_match.item_links
+                logger.info(
+                    f"Job {job_name}: Matched existing PO {po_match.doc_name} "
+                    f"via {po_match.match_method} "
+                    f"(confidence: {po_match.match_confidence:.2f})"
+                )
+            else:
+                po_name = create_purchase_order(
+                    extracted_data=extracted_data,
+                    supplier=supplier,
+                    settings=settings,
+                    job_name=job_name,
+                )
+                result["purchase_order"] = po_name
+                result["purchase_order_matched"] = False
+                created_doc_keys.add("purchase_order")
+                # Build item links from the newly created PO
+                po_item_links = build_item_links(
+                    matched_doc=po_name,
+                    matched_doctype="Purchase Order",
+                    extracted_items=extracted_data.get("items", []),
+                    settings=settings,
+                    supplier=supplier,
+                )
 
         if "Purchase Receipt" in needed:
-            pr_name = create_purchase_receipt(
-                extracted_data=extracted_data,
+            pr_match = find_matching_purchase_receipt(
                 supplier=supplier,
+                extracted_data=extracted_data,
                 settings=settings,
-                job_name=job_name,
-                purchase_order=created.get("purchase_order"),
+                purchase_order=result.get("purchase_order"),
             )
-            created["purchase_receipt"] = pr_name
+            if pr_match.found:
+                result["purchase_receipt"] = pr_match.doc_name
+                result["purchase_receipt_matched"] = True
+                result["purchase_receipt_match_method"] = pr_match.match_method
+                result["purchase_receipt_match_confidence"] = pr_match.match_confidence
+                pr_item_links = pr_match.item_links
+                logger.info(
+                    f"Job {job_name}: Matched existing PR {pr_match.doc_name} "
+                    f"via {pr_match.match_method} "
+                    f"(confidence: {pr_match.match_confidence:.2f})"
+                )
+            else:
+                pr_name = create_purchase_receipt(
+                    extracted_data=extracted_data,
+                    supplier=supplier,
+                    settings=settings,
+                    job_name=job_name,
+                    purchase_order=result.get("purchase_order"),
+                    po_item_links=po_item_links,
+                )
+                result["purchase_receipt"] = pr_name
+                result["purchase_receipt_matched"] = False
+                created_doc_keys.add("purchase_receipt")
+                # Build item links from the newly created PR
+                pr_item_links = build_item_links(
+                    matched_doc=pr_name,
+                    matched_doctype="Purchase Receipt",
+                    extracted_items=extracted_data.get("items", []),
+                    settings=settings,
+                    supplier=supplier,
+                )
 
         if "Purchase Invoice" in needed:
-            pi_name = create_purchase_invoice(
-                extracted_data=extracted_data,
+            pi_match = find_matching_purchase_invoice(
                 supplier=supplier,
+                extracted_data=extracted_data,
                 settings=settings,
-                job_name=job_name,
-                purchase_order=created.get("purchase_order"),
-                purchase_receipt=created.get("purchase_receipt"),
+                purchase_order=result.get("purchase_order"),
+                purchase_receipt=result.get("purchase_receipt"),
             )
-            created["purchase_invoice"] = pi_name
+            if pi_match.found:
+                result["purchase_invoice"] = pi_match.doc_name
+                result["purchase_invoice_matched"] = True
+                result["purchase_invoice_match_method"] = pi_match.match_method
+                result["purchase_invoice_match_confidence"] = pi_match.match_confidence
+                logger.info(
+                    f"Job {job_name}: Matched existing PI {pi_match.doc_name} "
+                    f"via {pi_match.match_method} "
+                    f"(confidence: {pi_match.match_confidence:.2f})"
+                )
+            else:
+                pi_name = create_purchase_invoice(
+                    extracted_data=extracted_data,
+                    supplier=supplier,
+                    settings=settings,
+                    job_name=job_name,
+                    purchase_order=result.get("purchase_order"),
+                    purchase_receipt=result.get("purchase_receipt"),
+                    po_item_links=po_item_links,
+                    pr_item_links=pr_item_links,
+                )
+                result["purchase_invoice"] = pi_name
+                result["purchase_invoice_matched"] = False
+                created_doc_keys.add("purchase_invoice")
 
-        # 4. Attach source document to all created docs
-        if source_file_url:
+        # 4. Attach source document only to newly created docs
+        if source_file_url and created_doc_keys:
+            # Filter created_docs to only include newly created documents
+            created_docs_for_attach = {
+                "supplier": supplier,
+            }
+            for key in created_doc_keys:
+                created_docs_for_attach[key] = result[key]
+
             attachments = attach_source_to_chain(
                 source_file_url=source_file_url,
                 source_type=source_type,
-                created_docs=created,
+                created_docs=created_docs_for_attach,
                 job_name=job_name,
             )
-            created["attachments"] = attachments
+            result["attachments"] = attachments
 
-        logger.info(f"Job {job_name}: Chain complete. Created: {list(created.keys())}")
-        return created
+        matched_docs = [
+            k for k in ("purchase_order", "purchase_receipt", "purchase_invoice")
+            if result.get(f"{k}_matched")
+        ]
+        created_docs = list(created_doc_keys)
+        logger.info(
+            f"Job {job_name}: Chain complete. "
+            f"Matched: {matched_docs}, Created: {created_docs}"
+        )
+        return result
 
 
 # ============================================================

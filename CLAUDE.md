@@ -50,7 +50,7 @@ Upload (PDF/Image/Email)
 | `procurement_ai/page/` | Procurement AI Dashboard (custom Frappe page) |
 | `extraction/` | `pdf_parser.py`, `ocr_engine.py` (Tesseract/EasyOCR), `preprocessor.py`, `email_parser.py` |
 | `llm/` | `graph.py` (LangGraph StateGraph), `nodes.py`, `models.py` (provider factory), `prompts.py`, `sanitizer.py`, `output_guard.py`, `consensus.py`, `schemas.py` (Pydantic), `local_trust.py`, `local_health.py` |
-| `chain_builder/` | `retrospective.py` (orchestrator), `supplier.py`, `purchase_order.py`, `purchase_receipt.py`, `purchase_invoice.py`, `attachments.py` |
+| `chain_builder/` | `retrospective.py` (orchestrator), `document_matcher.py` (find-before-create), `supplier.py`, `purchase_order.py`, `purchase_receipt.py`, `purchase_invoice.py`, `attachments.py` |
 | `validation/` | `field_validator.py`, `amount_checker.py`, `supplier_matcher.py` |
 | `utils/` | `security.py` (file upload validation), `logging.py` |
 | `fixtures/` | `custom_field.json` (6 custom fields on PO/PR/PI) |
@@ -79,16 +79,49 @@ All are `read_only=1`, `no_copy=1`, `hidden=1`, `print_hide=1`.
 | Delivery Note | Purchase Order + Purchase Receipt |
 | Invoice | Purchase Order + Purchase Receipt + Purchase Invoice |
 
-Source file is attached to all created documents via Frappe's File attachment system.
+Source file is attached to all **newly created** documents via Frappe's File attachment system. Matched (existing) documents do not get a duplicate attachment.
 
-### Item Matching (`_resolve_item` in `purchase_order.py`)
+### Document Matching (`document_matcher.py`)
 
-All three chain builders (PO, PR, PI) use the same 4-step matching hierarchy:
+The chain builder uses "find before create" logic. For each document type, it first tries to match an existing document before creating a new one. All queries exclude cancelled documents (`docstatus != 2`).
+
+**Purchase Order matching** (`find_matching_purchase_order`):
+
+| Priority | Method | Confidence | Description |
+|---|---|---|---|
+| 1 | `po_name_exact` | 1.00 | `order_reference` matches PO `name` exactly |
+| 2 | `po_confirmation_no` | 0.95 | `order_reference` matches PO `order_confirmation_no` |
+| 3 | `items_supplier_date` | 0.70–0.90 | Supplier + item overlap (Jaccard >= 0.7) + date proximity (±90 days), boosted by amount match and date closeness |
+
+**Purchase Receipt matching** (`find_matching_purchase_receipt`):
+
+| Priority | Method | Confidence | Description |
+|---|---|---|---|
+| 1 | `pr_linked_to_po` | 0.95 | PR Item has `purchase_order` linking to matched PO |
+| 2 | `pr_items_supplier_date` | 0.65–0.85 | Supplier + item overlap + date proximity |
+
+**Purchase Invoice matching** (`find_matching_purchase_invoice`):
+
+| Priority | Method | Confidence | Description |
+|---|---|---|---|
+| 1 | `bill_no` | 1.00 | `document_number` matches PI `bill_no` + same supplier |
+| 2 | `pi_linked_to_po` | 0.90 | PI Item has `purchase_order` linking to matched PO |
+| 3 | `pi_amount_date` | 0.60–0.80 | Supplier + total amount (±5%) + date proximity |
+
+**Ambiguity check**: For fuzzy matches (priority 3), if top-2 candidates are within 0.10 confidence, no match is returned (too ambiguous).
+
+**Item linking**: When a match is found, `build_item_links()` maps extracted items to existing doc item rows (by item_code, then keyword overlap, then qty+rate). These links populate `purchase_order_item` on PR items and `po_detail`/`pr_detail` on PI items for ERPNext's partial receipt/invoice tracking.
+
+**Result flags**: `build_chain()` returns `*_matched` booleans (e.g. `purchase_order_matched: True`), `*_match_method`, and `*_match_confidence` for each document type.
+
+### Item Matching (`_resolve_item` / `_try_resolve_item` in `purchase_order.py`)
+
+All three chain builders (PO, PR, PI) use the same 4-step matching hierarchy via `_resolve_item`. The `_try_resolve_item` variant runs steps 1-3 only (no creation) and is used by `document_matcher.py` during matching to avoid side effects:
 
 1. **Supplier + supplier_part_no** — query `Item Supplier` child table for matching `supplier` + `supplier_part_no`, prefer items with `delivered_by_supplier=1`; also accept non-drop-ship if exact match
 2. **Item code + text overlap** — find items with `delivered_by_supplier=1` where ERPNext item_code matches the extracted code, AND at least one keyword from item_name/description overlaps
 3. **Text match** — search any Item by `item_name` LIKE with extracted keywords, score candidates by keyword overlap (requires 2+ keyword matches to accept)
-4. **Create new Item** — creates with `delivered_by_supplier=1`, populates `supplier_items` child table with supplier + `supplier_part_no` from extracted data
+4. **Create new Item** — creates with `delivered_by_supplier=1`, populates `supplier_items` child table with supplier + `supplier_part_no` from extracted data (only in `_resolve_item`, not `_try_resolve_item`)
 
 Keywords are extracted by tokenizing item_name + description, filtering out words < 3 chars and German/English stopwords, sorted longest-first for specificity.
 

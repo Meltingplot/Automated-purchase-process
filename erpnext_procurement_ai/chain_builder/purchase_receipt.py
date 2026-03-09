@@ -18,6 +18,7 @@ def create_purchase_receipt(
     settings: dict,
     job_name: str,
     purchase_order: str | None = None,
+    po_item_links: dict | None = None,
 ) -> str:
     """
     Create a Purchase Receipt from extracted document data.
@@ -28,11 +29,15 @@ def create_purchase_receipt(
         settings: Plugin settings dict
         job_name: AI Procurement Job name
         purchase_order: Optional linked Purchase Order name
+        po_item_links: Optional mapping of extracted item index to PO item row
+                       {index: {"name": row_name, "item_code": item_code}}
 
     Returns:
         Purchase Receipt name
     """
-    items = _build_receipt_items(extracted_data, settings, supplier, purchase_order)
+    items = _build_receipt_items(
+        extracted_data, settings, supplier, purchase_order, po_item_links
+    )
     if not items:
         frappe.throw("Cannot create Purchase Receipt without line items")
 
@@ -63,15 +68,19 @@ def create_purchase_receipt(
 
 
 def _build_receipt_items(
-    extracted_data: dict, settings: dict, supplier: str, purchase_order: str | None
+    extracted_data: dict,
+    settings: dict,
+    supplier: str,
+    purchase_order: str | None,
+    po_item_links: dict | None = None,
 ) -> list[dict]:
-    """Build receipt items, optionally linked to a PO."""
+    """Build receipt items, optionally linked to a PO with item-level links."""
     company = settings.get("default_company")
     items = []
 
     from .purchase_order import _resolve_item, _resolve_uom
 
-    for item in extracted_data.get("items", []):
+    for idx, item in enumerate(extracted_data.get("items", [])):
         item_code = _resolve_item(item, settings, supplier)
         receipt_item = {
             "item_code": item_code,
@@ -84,6 +93,10 @@ def _build_receipt_items(
 
         if purchase_order:
             receipt_item["purchase_order"] = purchase_order
+
+        # Link to specific PO item row if available
+        if po_item_links and idx in po_item_links:
+            receipt_item["purchase_order_item"] = po_item_links[idx]["name"]
 
         items.append(receipt_item)
 

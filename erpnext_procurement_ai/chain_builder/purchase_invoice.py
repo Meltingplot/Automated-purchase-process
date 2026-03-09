@@ -19,6 +19,8 @@ def create_purchase_invoice(
     job_name: str,
     purchase_order: str | None = None,
     purchase_receipt: str | None = None,
+    po_item_links: dict | None = None,
+    pr_item_links: dict | None = None,
 ) -> str:
     """
     Create a Purchase Invoice from extracted document data.
@@ -30,12 +32,20 @@ def create_purchase_invoice(
         job_name: AI Procurement Job name
         purchase_order: Optional linked PO name
         purchase_receipt: Optional linked PR name
+        po_item_links: Optional mapping of extracted item index to PO item row
+        pr_item_links: Optional mapping of extracted item index to PR item row
 
     Returns:
         Purchase Invoice name
     """
     items = _build_invoice_items(
-        extracted_data, settings, supplier, purchase_order, purchase_receipt
+        extracted_data,
+        settings,
+        supplier,
+        purchase_order,
+        purchase_receipt,
+        po_item_links,
+        pr_item_links,
     )
     if not items:
         frappe.throw("Cannot create Purchase Invoice without line items")
@@ -89,14 +99,16 @@ def _build_invoice_items(
     supplier: str,
     purchase_order: str | None,
     purchase_receipt: str | None,
+    po_item_links: dict | None = None,
+    pr_item_links: dict | None = None,
 ) -> list[dict]:
-    """Build invoice items, optionally linked to PO and receipt."""
+    """Build invoice items, optionally linked to PO and receipt with item-level links."""
     company = settings.get("default_company")
     items = []
 
     from .purchase_order import _resolve_item, _resolve_uom
 
-    for item in extracted_data.get("items", []):
+    for idx, item in enumerate(extracted_data.get("items", [])):
         item_code = _resolve_item(item, settings, supplier)
         invoice_item = {
             "item_code": item_code,
@@ -111,6 +123,14 @@ def _build_invoice_items(
             invoice_item["purchase_order"] = purchase_order
         if purchase_receipt:
             invoice_item["purchase_receipt"] = purchase_receipt
+
+        # Link to specific PO item row if available
+        if po_item_links and idx in po_item_links:
+            invoice_item["po_detail"] = po_item_links[idx]["name"]
+
+        # Link to specific PR item row if available
+        if pr_item_links and idx in pr_item_links:
+            invoice_item["pr_detail"] = pr_item_links[idx]["name"]
 
         items.append(invoice_item)
 

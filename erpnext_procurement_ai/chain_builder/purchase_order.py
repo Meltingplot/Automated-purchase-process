@@ -80,6 +80,11 @@ def create_purchase_order(
         "items": items,
     }
 
+    # Store order_reference as order_confirmation_no for future matching
+    order_ref = extracted_data.get("order_reference", "").strip()
+    if order_ref:
+        po_data["order_confirmation_no"] = order_ref
+
     # Add tax charges from extracted data
     taxes = _build_taxes(extracted_data, settings)
     if taxes:
@@ -265,6 +270,40 @@ def _get_default_item_group() -> str:
     )
 
 
+def _try_resolve_item(item: dict, settings: dict, supplier: str = "") -> str | None:
+    """
+    Try to find an existing ERPNext Item matching the extracted item.
+
+    Steps 1-3 of _resolve_item without creating a new Item.
+    Returns None if no match found. Safe for use during document matching
+    (no side effects).
+    """
+    extracted_code = _sanitize_code(item.get("item_code", ""))
+    extracted_name = _sanitize_text(item.get("item_name", "Unknown Item"), max_len=140)
+    extracted_desc = _sanitize_text(item.get("description", ""), max_len=500)
+
+    # Step 1: delivered_by_supplier + supplier + supplier_part_no match
+    if supplier and extracted_code:
+        match = _match_by_supplier_part_no(supplier, extracted_code)
+        if match:
+            return match
+
+    # Step 2: delivered_by_supplier + item_code match + text overlap
+    if extracted_code:
+        match = _match_by_code_and_text(
+            extracted_code, extracted_name, extracted_desc
+        )
+        if match:
+            return match
+
+    # Step 3: Text match on item_name or description
+    match = _match_by_text(extracted_name, extracted_desc)
+    if match:
+        return match
+
+    return None
+
+
 def _resolve_item(item: dict, settings: dict, supplier: str = "") -> str:
     """
     Find or create an ERPNext Item matching the extracted item.
@@ -280,39 +319,9 @@ def _resolve_item(item: dict, settings: dict, supplier: str = "") -> str:
     3. Any Item where item_name or description has text overlap
     4. Create new Item
     """
-    extracted_code = _sanitize_code(item.get("item_code", ""))
-    extracted_name = _sanitize_text(item.get("item_name", "Unknown Item"), max_len=140)
-    extracted_desc = _sanitize_text(item.get("description", ""), max_len=500)
-
-    # Step 1: delivered_by_supplier + supplier + supplier_part_no match
-    if supplier and extracted_code:
-        match = _match_by_supplier_part_no(supplier, extracted_code)
-        if match:
-            logger.info(
-                f"Item matched via supplier_part_no: {match} "
-                f"(supplier={supplier}, part_no={extracted_code})"
-            )
-            return match
-
-    # Step 2: delivered_by_supplier + item_code match + text overlap
-    if extracted_code:
-        match = _match_by_code_and_text(
-            extracted_code, extracted_name, extracted_desc
-        )
-        if match:
-            logger.info(
-                f"Item matched via item_code + text overlap: {match} "
-                f"(code={extracted_code})"
-            )
-            return match
-
-    # Step 3: Text match on item_name or description
-    match = _match_by_text(extracted_name, extracted_desc)
+    match = _try_resolve_item(item, settings, supplier)
     if match:
-        logger.info(
-            f"Item matched via text similarity: {match} "
-            f"(name={extracted_name!r})"
-        )
+        logger.info(f"Item resolved to existing: {match}")
         return match
 
     # Step 4: Create new item
@@ -460,9 +469,15 @@ def _create_item(item: dict, supplier: str, settings: dict) -> str:
     item_code = _sanitize_code(item.get("item_code", ""))
     uom = _resolve_uom(item.get("uom", "Nos"))
 
+    # item_code is mandatory in ERPNext. Generate a unique SKU to avoid
+    # collisions — neither the supplier's part number nor item_name are
+    # safe as item_code. The supplier's code is stored as supplier_part_no.
+    generated_sku = f"SKU-{frappe.generate_hash(length=8).upper()}"
+
     new_item = frappe.get_doc(
         {
             "doctype": "Item",
+            "item_code": generated_sku,
             "item_name": item_name,
             "item_group": _get_default_item_group(),
             "stock_uom": uom,
