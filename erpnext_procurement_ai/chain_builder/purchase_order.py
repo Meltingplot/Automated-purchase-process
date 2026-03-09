@@ -765,7 +765,9 @@ def _match_by_code_and_text(
         return candidates[0]["name"]
 
     for c in candidates:
-        candidate_text = f"{c.get('item_name', '')} {c.get('description', '')}".lower()
+        candidate_text = _normalize_dimensions(
+            f"{c.get('item_name', '')} {c.get('description', '')}"
+        ).lower()
         if any(kw in candidate_text for kw in keywords):
             return c["name"]
 
@@ -812,7 +814,7 @@ def _match_by_text(
                 if _has_conflicting_supplier_part(m["name"], supplier, extracted_code):
                     continue
 
-            candidate_text = (
+            candidate_text = _normalize_dimensions(
                 f"{m.get('item_name', '')} {m.get('description', '')}"
             ).lower()
             score = sum(1 for k in keywords if k in candidate_text)
@@ -844,6 +846,39 @@ def _has_conflicting_supplier_part(
     return existing[0].get("supplier_part_no", "") != extracted_code
 
 
+def _normalize_dimensions(text: str) -> str:
+    """Normalize dimension expressions so '6mm' and '6 mm' match identically.
+
+    Collapses optional whitespace between a number and a unit suffix
+    (mm, cm, m, km, kg, g, ml, l) into the no-space form, e.g.
+    "4 mm x 6 mm" → "4mm x 6mm".
+    """
+    import re
+
+    return re.sub(
+        r"(\d)\s+("
+        r"mm²|cm²|km²|m²|mm³|cm³|m³|"  # area / volume (longest first)
+        r"µm|nm|mm|cm|dm|km|m|"  # length
+        r"mg|kg|g|t|"  # mass
+        r"µl|ml|cl|dl|hl|l|"  # volume
+        r"kPa|MPa|Pa|mbar|bar|"  # pressure
+        r"kHz|MHz|GHz|Hz|"  # frequency
+        r"mA|kA|A|"  # current
+        r"mV|kV|V|"  # voltage
+        r"kWh|MWh|Wh|"  # energy
+        r"µW|mW|kW|MW|GW|W|"  # power
+        r"µF|nF|pF|F|"  # capacitance
+        r"mH|µH|H|"  # inductance
+        r"kN|MN|Nm|N|"  # force / torque
+        r"µs|ms|ns|s|"  # time
+        r"dB|lm|lx|mol|cd|°C|kΩ|MΩ|Ω"  # misc
+        r")\b",
+        r"\1\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
 def _extract_keywords(item_name: str, description: str) -> list[str]:
     """
     Extract meaningful keywords from item name and description.
@@ -858,7 +893,7 @@ def _extract_keywords(item_name: str, description: str) -> list[str]:
         "ein", "eine", "the", "and", "for", "with", "from",
     }
 
-    text = f"{item_name or ''} {description or ''}"
+    text = _normalize_dimensions(f"{item_name or ''} {description or ''}")
     words = re.findall(r"[a-zA-Z0-9äöüÄÖÜß]+", text.lower())
     keywords = [
         w for w in words if len(w) >= 3 and w not in stopwords
