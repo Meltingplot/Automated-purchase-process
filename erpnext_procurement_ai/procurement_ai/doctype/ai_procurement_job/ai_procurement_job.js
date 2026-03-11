@@ -21,6 +21,13 @@ frappe.ui.form.on("AI Procurement Job", {
             ).addClass("btn-primary");
 
             frm.add_custom_button(
+                __("Pre-create Items"),
+                function () {
+                    _precreate_items(frm);
+                }
+            );
+
+            frm.add_custom_button(
                 __("Reject"),
                 function () {
                     frappe.prompt(
@@ -593,7 +600,7 @@ function _confidence_badge(info) {
     );
 }
 
-function _collect_and_approve(frm) {
+function _collect_review_data(frm) {
     var wrapper = frm.fields_dict.review_html.$wrapper;
     var consensus = {};
     try {
@@ -674,13 +681,80 @@ function _collect_and_approve(frm) {
         stock_uom_mapping[idx] = val || null;
     });
 
-    // Save reviewed data, item mapping, and stock UOM mapping to the doc
-    frm.set_value("reviewed_data", JSON.stringify(reviewed));
-    frm.set_value("item_mapping", JSON.stringify(item_mapping));
-    frm.set_value("stock_uom_mapping", JSON.stringify(stock_uom_mapping));
-    frm.save().then(function () {
+    return {
+        reviewed: reviewed,
+        item_mapping: item_mapping,
+        stock_uom_mapping: stock_uom_mapping,
+    };
+}
+
+function _save_review_data(frm, data) {
+    frm.set_value("reviewed_data", JSON.stringify(data.reviewed));
+    frm.set_value("item_mapping", JSON.stringify(data.item_mapping));
+    frm.set_value("stock_uom_mapping", JSON.stringify(data.stock_uom_mapping));
+    return frm.save();
+}
+
+function _collect_and_approve(frm) {
+    var data = _collect_review_data(frm);
+    _save_review_data(frm, data).then(function () {
         frm.call("approve_and_create").then(function () {
             frm.reload_doc();
+        });
+    });
+}
+
+function _precreate_items(frm) {
+    var data = _collect_review_data(frm);
+    _save_review_data(frm, data).then(function () {
+        frm.call("precreate_items").then(function (r) {
+            if (!r || !r.message) return;
+            var results = r.message;
+            var wrapper = frm.fields_dict.review_html.$wrapper;
+            var created_count = 0;
+
+            results.forEach(function (item) {
+                var idx = item.idx;
+
+                // Update Link control with resolved item_code
+                var $link = wrapper.find('.item-link-control[data-idx="' + idx + '"]');
+                var link_control = $link.data("control");
+                if (link_control) {
+                    link_control.set_value(item.item_code);
+                }
+
+                // Update badge
+                var $cell = wrapper.find('.item-match-cell[data-idx="' + idx + '"]');
+                if (item.created) {
+                    created_count++;
+                    $cell.html(
+                        '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                            __("Created") + "</span>"
+                    );
+                } else {
+                    $cell.html(
+                        '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                            __("Exists") + "</span>"
+                    );
+                }
+
+                // Lock stock UOM (item now exists in ERPNext)
+                if (item.stock_uom) {
+                    _set_stock_uom_readonly(wrapper, idx, item.stock_uom);
+                }
+            });
+
+            if (created_count > 0) {
+                frappe.show_alert({
+                    message: __("{0} item(s) created. You can edit them before approving.", [created_count]),
+                    indicator: "green",
+                });
+            } else {
+                frappe.show_alert({
+                    message: __("All items already exist."),
+                    indicator: "blue",
+                });
+            }
         });
     });
 }

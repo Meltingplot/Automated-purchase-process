@@ -65,6 +65,74 @@ class AIProcurementJob(Document):
         frappe.msgprint(f"Creating documents for {self.name}", alert=True)
 
     @frappe.whitelist()
+    def precreate_items(self):
+        """Pre-create Items so the user can edit them before approving.
+
+        For each line item not already mapped via the Link control,
+        finds an existing Item or creates a new one. Returns a list
+        of {idx, item_code, item_name, stock_uom, created} dicts
+        so the review UI can update badges and lock controls.
+        """
+        if self.status != "Awaiting Review":
+            frappe.throw(
+                f"Cannot pre-create items in status '{self.status}'. "
+                "Only jobs in 'Awaiting Review' can pre-create items."
+            )
+
+        data = json.loads(self.reviewed_data or self.consensus_data or "{}")
+        if not data:
+            frappe.throw("No extracted data available")
+
+        from ....chain_builder.retrospective import sanitize_extracted_data
+        from ....chain_builder.supplier import ensure_supplier
+        from ....chain_builder.purchase_order import _resolve_item, _try_resolve_item
+
+        clean = sanitize_extracted_data(data)
+        supplier = ensure_supplier(clean)
+
+        item_mapping = json.loads(self.item_mapping or "{}")
+        stock_uom_mapping = json.loads(self.stock_uom_mapping or "{}")
+
+        settings_doc = frappe.get_single("AI Procurement Settings")
+        settings = settings_doc.get_settings_dict()
+
+        results = []
+        for idx, item in enumerate(clean.get("items", [])):
+            mapped_code = item_mapping.get(str(idx))
+            if mapped_code:
+                results.append({
+                    "idx": idx,
+                    "item_code": mapped_code,
+                    "item_name": frappe.db.get_value(
+                        "Item", mapped_code, "item_name",
+                    ) or mapped_code,
+                    "stock_uom": frappe.db.get_value(
+                        "Item", mapped_code, "stock_uom",
+                    ),
+                    "created": False,
+                })
+                continue
+
+            existing = _try_resolve_item(item, settings, supplier)
+            stock_uom = stock_uom_mapping.get(str(idx))
+            item_code = _resolve_item(item, settings, supplier, stock_uom=stock_uom)
+
+            results.append({
+                "idx": idx,
+                "item_code": item_code,
+                "item_name": frappe.db.get_value(
+                    "Item", item_code, "item_name",
+                ) or item_code,
+                "stock_uom": frappe.db.get_value(
+                    "Item", item_code, "stock_uom",
+                ),
+                "created": existing is None,
+            })
+
+        frappe.db.commit()
+        return results
+
+    @frappe.whitelist()
     def mark_completed(self):
         """Mark the job as completed after user has verified created documents."""
         if self.status != "Needs Review":
