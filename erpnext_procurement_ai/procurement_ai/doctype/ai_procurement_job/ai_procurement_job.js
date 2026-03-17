@@ -697,10 +697,12 @@ function _save_review_data(frm, data) {
 
 function _collect_and_approve(frm) {
     var data = _collect_review_data(frm);
-    _save_review_data(frm, data).then(function () {
-        frm.call("approve_and_create").then(function () {
-            frm.reload_doc();
-        });
+    frm.call("approve_and_create", {
+        reviewed_data: JSON.stringify(data.reviewed),
+        item_mapping: JSON.stringify(data.item_mapping),
+        stock_uom_mapping: JSON.stringify(data.stock_uom_mapping),
+    }).then(function () {
+        frm.reload_doc();
     });
 }
 

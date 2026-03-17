@@ -75,6 +75,9 @@ def create_purchase_order(
     # Retrospective documents must not be dated later than the source document
     doc_date = extracted_data.get("document_date") or today()
     schedule = extracted_data.get("delivery_date") or doc_date
+    # ERPNext requires schedule_date >= transaction_date
+    if schedule < doc_date:
+        schedule = doc_date
 
     po_data = {
         "doctype": "Purchase Order",
@@ -132,6 +135,9 @@ def _build_items(
     items = []
     doc_date = extracted_data.get("document_date") or today()
     schedule_date = extracted_data.get("delivery_date") or doc_date
+    # ERPNext requires schedule_date >= transaction_date
+    if schedule_date < doc_date:
+        schedule_date = doc_date
 
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None

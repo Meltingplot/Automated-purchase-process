@@ -43,13 +43,24 @@ class AIProcurementJob(Document):
         frappe.msgprint(f"Processing started for {self.name}", alert=True)
 
     @frappe.whitelist()
-    def approve_and_create(self):
-        """Approve reviewed data and trigger document chain creation."""
+    def approve_and_create(self, reviewed_data=None, item_mapping=None, stock_uom_mapping=None):
+        """Approve reviewed data and trigger document chain creation.
+
+        Accepts review data inline to avoid a separate save round-trip
+        (two sequential writes to the same doc cause a deadlock).
+        """
         if self.status != "Awaiting Review":
             frappe.throw(
                 f"Cannot approve job in status '{self.status}'. "
                 "Only jobs in 'Awaiting Review' can be approved."
             )
+
+        if reviewed_data is not None:
+            self.reviewed_data = reviewed_data if isinstance(reviewed_data, str) else json.dumps(reviewed_data)
+        if item_mapping is not None:
+            self.item_mapping = item_mapping if isinstance(item_mapping, str) else json.dumps(item_mapping)
+        if stock_uom_mapping is not None:
+            self.stock_uom_mapping = stock_uom_mapping if isinstance(stock_uom_mapping, str) else json.dumps(stock_uom_mapping)
 
         self.status = "Processing"
         self.save()
