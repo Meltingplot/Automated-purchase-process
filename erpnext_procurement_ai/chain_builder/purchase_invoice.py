@@ -57,6 +57,9 @@ def create_purchase_invoice(
     # Retrospective documents must not be dated later than the source document
     doc_date = extracted_data.get("document_date") or today()
     due = extracted_data.get("delivery_date") or doc_date
+    # ERPNext requires due_date >= posting_date
+    if due < doc_date:
+        due = doc_date
 
     from .purchase_order import _build_taxes
 
