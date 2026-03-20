@@ -1,0 +1,38 @@
+[project]
+name = "erpnext_procurement_ai"
+version = "0.1.0"
+description = "AI-powered procurement automation for ERPNext v15"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Meltingplot GmbH" },
+]
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-google-genai>=2.0.0",
+    "pdfplumber>=0.11.0",
+    "pytesseract>=0.3.10",
+    "easyocr>=1.7.0",
+    "Pillow>=10.0.0",
+    "pydantic>=2.0.0",
+    "python-magic>=0.4.27",
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench]
+app-name = "erpnext_procurement_ai"
+app-publisher = "Meltingplot GmbH"
+app-description = "AI-powered procurement automation for ERPNext"
+app-email = "info@meltingplot.com"
+app-color = "#4F46E5"
+app-icon = "octicon octicon-package"
+app-license = "MIT"
+required-apps = ["frappe", "erpnext"]
