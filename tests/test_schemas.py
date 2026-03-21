@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from erpnext_procurement_ai.llm.schemas import ExtractedDocument, LineItem
+from procurement_ai.llm.schemas import ExtractedDocument, LineItem
 
 
 class TestLineItem:

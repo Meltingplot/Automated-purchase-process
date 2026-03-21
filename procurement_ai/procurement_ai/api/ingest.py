@@ -24,7 +24,7 @@ def process(source_type: str = "Auto-Detect"):
     """
     API endpoint: Upload and queue a document for processing.
 
-    Called as: POST /api/method/erpnext_procurement_ai.procurement_ai.api.ingest.process
+    Called as: POST /api/method/procurement_ai.procurement_ai.api.ingest.process
 
     Expects a file upload in the request. Creates an AI Procurement Job
     and enqueues background processing.
@@ -80,7 +80,7 @@ def process(source_type: str = "Auto-Detect"):
         job.save()
 
         frappe.enqueue(
-            "erpnext_procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
+            "procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
             queue="long",
             timeout=600,
             procurement_job_name=job.name,
@@ -416,7 +416,7 @@ def process_pending_jobs():
 
     for job_data in pending_jobs:
         frappe.enqueue(
-            "erpnext_procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
+            "procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
             queue="long",
             timeout=600,
             procurement_job_name=job_data["name"],

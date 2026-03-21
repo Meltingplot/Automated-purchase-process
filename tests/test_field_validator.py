@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from erpnext_procurement_ai.validation.field_validator import FieldValidator
+from procurement_ai.validation.field_validator import FieldValidator
 
 
 class TestFieldValidator:

@@ -4,15 +4,15 @@ include *.json
 include *.md
 include *.py
 include *.txt
-recursive-include erpnext_procurement_ai *.css
-recursive-include erpnext_procurement_ai *.csv
-recursive-include erpnext_procurement_ai *.html
-recursive-include erpnext_procurement_ai *.ico
-recursive-include erpnext_procurement_ai *.js
-recursive-include erpnext_procurement_ai *.json
-recursive-include erpnext_procurement_ai *.md
-recursive-include erpnext_procurement_ai *.png
-recursive-include erpnext_procurement_ai *.py
-recursive-include erpnext_procurement_ai *.svg
-recursive-include erpnext_procurement_ai *.txt
-recursive-exclude erpnext_procurement_ai *.pyc
+recursive-include procurement_ai *.css
+recursive-include procurement_ai *.csv
+recursive-include procurement_ai *.html
+recursive-include procurement_ai *.ico
+recursive-include procurement_ai *.js
+recursive-include procurement_ai *.json
+recursive-include procurement_ai *.md
+recursive-include procurement_ai *.png
+recursive-include procurement_ai *.py
+recursive-include procurement_ai *.svg
+recursive-include procurement_ai *.txt
+recursive-exclude procurement_ai *.pyc

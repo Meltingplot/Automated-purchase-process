@@ -11,7 +11,7 @@ import frappe
 
 def get_logger(name: str) -> logging.Logger:
     """Get a logger with the app prefix."""
-    return logging.getLogger(f"erpnext_procurement_ai.{name}")
+    return logging.getLogger(f"procurement_ai.{name}")
 
 
 def log_job_event(job_name: str, event: str, details: str = ""):

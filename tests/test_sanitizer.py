@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from erpnext_procurement_ai.llm.sanitizer import InputSanitizer
+from procurement_ai.llm.sanitizer import InputSanitizer
 
 
 class TestInputSanitizer:

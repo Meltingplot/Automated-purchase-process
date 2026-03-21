@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from erpnext_procurement_ai.llm.sanitizer import InputSanitizer
-from erpnext_procurement_ai.utils.security import validate_upload
+from procurement_ai.llm.sanitizer import InputSanitizer
+from procurement_ai.utils.security import validate_upload
 
 
 class TestPromptInjection:

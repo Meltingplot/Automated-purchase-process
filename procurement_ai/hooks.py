@@ -12,7 +12,7 @@ required_apps = ["frappe", "erpnext"]
 # Scheduler Events
 scheduler_events = {
     "all": [
-        "erpnext_procurement_ai.procurement_ai.api.ingest.process_pending_jobs"
+        "procurement_ai.procurement_ai.api.ingest.process_pending_jobs"
     ],
 }
 
