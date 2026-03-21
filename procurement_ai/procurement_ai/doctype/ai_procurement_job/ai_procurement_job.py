@@ -34,7 +34,7 @@ class AIProcurementJob(Document):
         frappe.db.commit()  # Release row lock before enqueuing
 
         frappe.enqueue(
-            "erpnext_procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
+            "procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
             queue="long",
             timeout=600,
             procurement_job_name=self.name,
@@ -67,7 +67,7 @@ class AIProcurementJob(Document):
         frappe.db.commit()  # Release row lock before enqueuing
 
         frappe.enqueue(
-            "erpnext_procurement_ai.procurement_ai.api.ingest.run_chain_from_review",
+            "procurement_ai.procurement_ai.api.ingest.run_chain_from_review",
             queue="long",
             timeout=600,
             procurement_job_name=self.name,

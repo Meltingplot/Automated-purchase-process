@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from erpnext_procurement_ai.llm.local_trust import LocalLLMTrustPolicy
-from erpnext_procurement_ai.llm.models import LLMProviderFactory
+from procurement_ai.llm.local_trust import LocalLLMTrustPolicy
+from procurement_ai.llm.models import LLMProviderFactory
 
 
 class TestLLMProviderFactory:

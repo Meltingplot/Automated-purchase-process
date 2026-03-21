@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from erpnext_procurement_ai.llm.output_guard import OutputGuard
+from procurement_ai.llm.output_guard import OutputGuard
 
 
 class TestOutputGuard:

@@ -1,4 +1,0 @@
-[pre_model_sync]
-erpnext_procurement_ai.patches.remove_ai_retrospective_field
-
-[post_model_sync]

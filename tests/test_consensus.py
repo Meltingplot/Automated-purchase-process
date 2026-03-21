@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from erpnext_procurement_ai.llm.consensus import ConsensusEngine
+from procurement_ai.llm.consensus import ConsensusEngine
 
 
 class TestConsensusEngine:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from erpnext_procurement_ai.validation.amount_checker import AmountChecker
+from procurement_ai.validation.amount_checker import AmountChecker
 
 
 class TestAmountChecker:

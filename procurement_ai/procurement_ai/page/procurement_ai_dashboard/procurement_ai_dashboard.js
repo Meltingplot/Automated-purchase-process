@@ -28,7 +28,7 @@ frappe.pages["procurement-ai-dashboard"].on_page_load = function (wrapper) {
 
 function load_dashboard(page) {
     frappe.call({
-        method: "erpnext_procurement_ai.procurement_ai.api.status.get_dashboard_stats",
+        method: "procurement_ai.procurement_ai.api.status.get_dashboard_stats",
         callback: function (r) {
             if (r.message) {
                 render_stats(page, r.message);

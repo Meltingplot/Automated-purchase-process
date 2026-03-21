@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**ERPNext Procurement AI** (`erpnext_procurement_ai`) is a Frappe v15 custom app that automates the purchase process. Upload any procurement document (cart, order confirmation, delivery note, invoice) and the plugin extracts structured data via a multi-LLM consensus pipeline, then creates the complete ERPNext document chain retrospectively.
+**ERPNext Procurement AI** (`procurement_ai`) is a Frappe v15 custom app that automates the purchase process. Upload any procurement document (cart, order confirmation, delivery note, invoice) and the plugin extracts structured data via a multi-LLM consensus pipeline, then creates the complete ERPNext document chain retrospectively.
 
 **Publisher:** Meltingplot GmbH | **License:** MIT | **Python:** >=3.11
 
@@ -200,9 +200,9 @@ Minimum 2 active providers required for consensus (unless `development_mode` is 
 
 ### API Endpoints
 
-- `POST /api/method/erpnext_procurement_ai.procurement_ai.api.ingest.process` -- upload file, create job, enqueue processing (requires `create` permission on AI Procurement Job)
-- `GET /api/method/erpnext_procurement_ai.procurement_ai.api.status.get_job_status` -- job status + created doc links
-- `GET /api/method/erpnext_procurement_ai.procurement_ai.api.status.get_dashboard_stats` -- status counts, recent jobs, open escalations (requires `read` permission on AI Procurement Job)
+- `POST /api/method/procurement_ai.procurement_ai.api.ingest.process` -- upload file, create job, enqueue processing (requires `create` permission on AI Procurement Job)
+- `GET /api/method/procurement_ai.procurement_ai.api.status.get_job_status` -- job status + created doc links
+- `GET /api/method/procurement_ai.procurement_ai.api.status.get_dashboard_stats` -- status counts, recent jobs, open escalations (requires `read` permission on AI Procurement Job)
 
 ### Scheduler
 
