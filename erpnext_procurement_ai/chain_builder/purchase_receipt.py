@@ -53,7 +53,6 @@ def create_purchase_receipt(
         "supplier": supplier,
         "company": settings.get("default_company"),
         "posting_date": doc_date,
-        "ai_retrospective": 1,
         "ai_procurement_job": job_name,
         "items": items,
     }
