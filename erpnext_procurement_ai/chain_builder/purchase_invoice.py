@@ -71,7 +71,6 @@ def create_purchase_invoice(
         "due_date": due,
         "bill_no": extracted_data.get("document_number", ""),
         "bill_date": doc_date,
-        "ai_retrospective": 1,
         "ai_procurement_job": job_name,
         "items": items,
     }

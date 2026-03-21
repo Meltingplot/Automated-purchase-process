@@ -85,7 +85,6 @@ def create_purchase_order(
         "company": settings.get("default_company"),
         "transaction_date": doc_date,
         "schedule_date": schedule,
-        "ai_retrospective": 1,
         "ai_procurement_job": job_name,
         "items": items,
     }
