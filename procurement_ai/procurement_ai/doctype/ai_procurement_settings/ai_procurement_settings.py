@@ -1,4 +1,5 @@
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -10,7 +11,7 @@ class AIProcurementSettings(Document):
     def _validate_confidence_threshold(self):
         if self.confidence_threshold is not None:
             if not (0.0 <= self.confidence_threshold <= 1.0):
-                frappe.throw("Confidence threshold must be between 0.0 and 1.0")
+                frappe.throw(_("Confidence threshold must be between 0.0 and 1.0"))
 
     def _validate_provider_count(self):
         """Ensure at least 1 provider is configured for processing."""
@@ -32,8 +33,8 @@ class AIProcurementSettings(Document):
 
         if self.enable_auto_processing and active_count < 2 and not self.require_document_review:
             frappe.msgprint(
-                "With only 1 LLM provider, document review will be enforced "
-                "regardless of the 'Require Document Review' setting (no consensus possible).",
+                _("With only 1 LLM provider, document review will be enforced "
+                  "regardless of the 'Require Document Review' setting (no consensus possible)."),
                 indicator="orange",
                 alert=True,
             )

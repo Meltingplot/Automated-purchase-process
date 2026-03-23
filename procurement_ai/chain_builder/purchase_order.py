@@ -9,6 +9,7 @@ import math
 import re
 
 import frappe
+from frappe import _
 from frappe.utils import flt, round_based_on_smallest_currency_fraction, today
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def create_purchase_order(
     """
     items = _build_items(extracted_data, settings, supplier, item_mapping=item_mapping, stock_uom_mapping=stock_uom_mapping)
     if not items:
-        frappe.throw("Cannot create Purchase Order without line items")
+        frappe.throw(_("Cannot create Purchase Order without line items"))
 
     # Retrospective documents must not be dated later than the source document
     doc_date = extracted_data.get("document_date") or today()
@@ -717,8 +718,8 @@ def _get_default_item_group() -> str:
         return groups[0]["name"]
 
     frappe.throw(
-        "No Item Group found. Please create at least one Item Group "
-        "or set a default in Stock Settings."
+        _("No Item Group found. Please create at least one Item Group "
+          "or set a default in Stock Settings.")
     )
 
 

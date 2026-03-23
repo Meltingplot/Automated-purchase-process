@@ -15,6 +15,7 @@ import os
 import traceback
 
 import frappe
+from frappe import _
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def process(source_type: str = "Auto-Detect"):
     # Get uploaded file
     uploaded_file = frappe.request.files.get("file")
     if not uploaded_file:
-        frappe.throw("No file uploaded")
+        frappe.throw(_("No file uploaded"))
 
     filename = uploaded_file.filename
     file_content = uploaded_file.read()
@@ -321,11 +322,11 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
         stage = "completed"
 
     job.save()
-    frappe.db.commit()
+    frappe.db.commit()  # Persist status before adding comment in background job  # nosemgrep
 
     if verification:
         job.add_comment("Comment", verification)
-        frappe.db.commit()
+        frappe.db.commit()  # Persist comment before resolving escalations in background job  # nosemgrep
 
     # Auto-resolve open escalations for this job
     open_escalations = frappe.get_all(
@@ -480,7 +481,7 @@ def _extract_document(job, settings: dict) -> tuple[str, list[bytes]]:
     """Extract text and images from the uploaded document."""
     file_url = job.source_document_url or job.source_document
     if not file_url:
-        frappe.throw("No source document attached to job")
+        frappe.throw(_("No source document attached to job"))
 
     # Get file path
     file_path = frappe.get_site_path("private", "files", os.path.basename(file_url))
@@ -542,7 +543,7 @@ def _save_extraction_results(job, pipeline_result: dict):
         )
 
     job.save()
-    frappe.db.commit()
+    frappe.db.commit()  # Persist extraction results before next pipeline stage in background job  # nosemgrep
 
 
 def _create_escalation(job, pipeline_result: dict):

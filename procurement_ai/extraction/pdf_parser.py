@@ -105,6 +105,7 @@ class PDFParser:
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf_bytes)
+            tmp.flush()
             tmp_path = tmp.name
 
         try:
