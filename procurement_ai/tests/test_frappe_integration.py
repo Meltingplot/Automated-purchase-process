@@ -99,6 +99,8 @@ def check_settings_singleton():
 
 def check_scheduler_function():
     """Verify the scheduler target function can be resolved."""
+    import frappe
+
     fn = frappe.get_attr(
         "procurement_ai.procurement_ai.api.ingest.process_pending_jobs"
     )
