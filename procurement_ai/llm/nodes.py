@@ -246,17 +246,6 @@ def build_consensus_node(state: dict) -> dict:
             "escalation_reasons": [reason],
         }
 
-    # Development mode: single result = auto-accept
-    development_mode = settings.get("development_mode", False)
-    if development_mode and len(valid_results) == 1:
-        result = valid_results[0]
-        return {
-            "consensus": result["extracted_data"],
-            "confidence": result["confidence"],
-            "needs_escalation": False,
-            "escalation_reasons": [],
-        }
-
     # Build provider weights (local LLMs may have reduced weight)
     provider_weights = {}
     for r in valid_results:

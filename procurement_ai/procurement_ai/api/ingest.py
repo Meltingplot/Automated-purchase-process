@@ -191,11 +191,18 @@ def run_extraction_pipeline(procurement_job_name: str):
             )
             return
 
-        # Step 4b: Pause for human review if enabled
+        # Step 4b: Pause for human review if enabled or single-provider
         consensus_data = result.get("validated_data") or result.get("consensus") or {}
         source_type = result.get("source_type_hint", "Invoice")
 
-        if settings.get("require_document_review"):
+        # Force review when only one LLM produced valid results (no consensus)
+        valid_llm_count = sum(
+            1 for r in result.get("llm_results", [])
+            if r.get("extracted_data") is not None
+        )
+        force_review = valid_llm_count < 2
+
+        if settings.get("require_document_review") or force_review:
             job.status = "Awaiting Review"
             job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
             job.consensus_data = json.dumps(consensus_data)

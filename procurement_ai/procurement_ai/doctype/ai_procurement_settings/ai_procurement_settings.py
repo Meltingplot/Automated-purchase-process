@@ -13,10 +13,7 @@ class AIProcurementSettings(Document):
                 frappe.throw("Confidence threshold must be between 0.0 and 1.0")
 
     def _validate_provider_count(self):
-        """Ensure at least 2 providers are configured unless in dev mode."""
-        if self.development_mode:
-            return
-
+        """Ensure at least 1 provider is configured for processing."""
         active_count = 0
         if self.claude_api_key:
             active_count += 1
@@ -27,11 +24,18 @@ class AIProcurementSettings(Document):
         if self.enable_local_llm and self.local_llm_base_url:
             active_count += 1
 
-        if self.enable_auto_processing and active_count < 2:
+        if self.enable_auto_processing and active_count < 1:
             frappe.throw(
-                "At least 2 LLM providers must be configured for consensus. "
-                f"Currently active: {active_count}. "
-                "Enable Development Mode for single-provider operation."
+                "At least 1 LLM provider must be configured for processing. "
+                f"Currently active: {active_count}."
+            )
+
+        if self.enable_auto_processing and active_count < 2 and not self.require_document_review:
+            frappe.msgprint(
+                "With only 1 LLM provider, document review will be enforced "
+                "regardless of the 'Require Document Review' setting (no consensus possible).",
+                indicator="orange",
+                alert=True,
             )
 
     def get_settings_dict(self):

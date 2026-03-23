@@ -52,7 +52,8 @@ def build_extraction_graph(settings: dict) -> Any:
     Build the LangGraph extraction pipeline dynamically.
 
     Only includes nodes for active (configured) LLM providers.
-    Requires min 2 providers unless development_mode is enabled.
+    Requires at least 1 provider. Single-provider operation forces
+    human review (no auto-acceptance).
 
     Args:
         settings: dict from AIProcurementSettings.get_settings_dict()
@@ -61,7 +62,7 @@ def build_extraction_graph(settings: dict) -> Any:
         Compiled LangGraph application
 
     Raises:
-        ValueError: If fewer than 2 providers are active (non-dev mode)
+        ValueError: If no providers are active
     """
     workflow = StateGraph(ExtractionState)
 
@@ -75,14 +76,6 @@ def build_extraction_graph(settings: dict) -> Any:
 
     # Dynamic LLM nodes based on active providers
     active_providers = LLMProviderFactory.get_active_providers(settings)
-    development_mode = settings.get("development_mode", False)
-
-    if not development_mode and len(active_providers) < 2:
-        raise ValueError(
-            f"At least 2 LLM providers required for consensus. "
-            f"Active: {active_providers}. "
-            f"Configure more providers or enable Development Mode."
-        )
 
     if len(active_providers) < 1:
         raise ValueError("At least 1 LLM provider must be configured.")
