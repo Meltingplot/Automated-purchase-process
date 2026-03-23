@@ -30,7 +30,7 @@ class AIProcurementJob(Document):
             frappe.throw(f"Cannot process job in status '{self.status}'")
 
         # Verify the user has permissions to create all document types
-        from ..api.ingest import _check_creation_permissions
+        from procurement_ai.procurement_ai.api.ingest import _check_creation_permissions
 
         _check_creation_permissions()
 
@@ -61,7 +61,7 @@ class AIProcurementJob(Document):
             )
 
         # Verify the job owner has permissions to create all document types
-        from ..api.ingest import _check_creation_permissions
+        from procurement_ai.procurement_ai.api.ingest import _check_creation_permissions
 
         _check_creation_permissions(user=self.owner)
 
@@ -69,7 +69,7 @@ class AIProcurementJob(Document):
             # Validate reviewed_data against the extraction schema
             from pydantic import ValidationError as PydanticValidationError
 
-            from ....llm.schemas import ExtractedDocument
+            from procurement_ai.llm.schemas import ExtractedDocument
 
             data = json.loads(reviewed_data) if isinstance(reviewed_data, str) else reviewed_data
             try:
@@ -125,9 +125,9 @@ class AIProcurementJob(Document):
         if not data:
             frappe.throw("No extracted data available")
 
-        from ....chain_builder.retrospective import sanitize_extracted_data
-        from ....chain_builder.supplier import ensure_supplier
-        from ....chain_builder.purchase_order import _resolve_item, _try_resolve_item
+        from procurement_ai.chain_builder.retrospective import sanitize_extracted_data
+        from procurement_ai.chain_builder.supplier import ensure_supplier
+        from procurement_ai.chain_builder.purchase_order import _resolve_item, _try_resolve_item
 
         clean = sanitize_extracted_data(data)
         supplier = ensure_supplier(clean)
@@ -199,12 +199,12 @@ class AIProcurementJob(Document):
             return {"supplier": None, "items": []}
 
         # Sanitize data the same way build_chain does
-        from ....chain_builder.retrospective import sanitize_extracted_data
+        from procurement_ai.chain_builder.retrospective import sanitize_extracted_data
 
         clean = sanitize_extracted_data(consensus)
 
         # Check supplier
-        from ....validation.supplier_matcher import SupplierMatcher
+        from procurement_ai.validation.supplier_matcher import SupplierMatcher
 
         supplier_match = SupplierMatcher.find_match(clean)
         supplier_info = None
@@ -216,7 +216,7 @@ class AIProcurementJob(Document):
             }
 
         # Check each item (try_resolve only, no creation) + UOM adjustment
-        from ....chain_builder.purchase_order import (
+        from procurement_ai.chain_builder.purchase_order import (
             _adjust_bulk_uom,
             _resolve_uom,
             _true_unit_price,
