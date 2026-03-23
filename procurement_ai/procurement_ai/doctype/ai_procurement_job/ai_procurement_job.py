@@ -29,6 +29,11 @@ class AIProcurementJob(Document):
         if self.status not in ("Pending", "Error", "Needs Review"):
             frappe.throw(f"Cannot process job in status '{self.status}'")
 
+        # Verify the user has permissions to create all document types
+        from ..api.ingest import _check_creation_permissions
+
+        _check_creation_permissions()
+
         self.status = "Processing"
         self.save()
         frappe.db.commit()  # Release row lock before enqueuing
@@ -55,7 +60,27 @@ class AIProcurementJob(Document):
                 "Only jobs in 'Awaiting Review' can be approved."
             )
 
+        # Verify the job owner has permissions to create all document types
+        from ..api.ingest import _check_creation_permissions
+
+        _check_creation_permissions(user=self.owner)
+
         if reviewed_data is not None:
+            # Validate reviewed_data against the extraction schema
+            from pydantic import ValidationError as PydanticValidationError
+
+            from ....llm.schemas import ExtractedDocument
+
+            data = json.loads(reviewed_data) if isinstance(reviewed_data, str) else reviewed_data
+            try:
+                ExtractedDocument.model_validate(data)
+            except PydanticValidationError as e:
+                frappe.throw(
+                    f"Reviewed data failed validation: {e.error_count()} error(s). "
+                    "Please correct the data and try again.",
+                    title="Validation Error",
+                )
+
             self.reviewed_data = reviewed_data if isinstance(reviewed_data, str) else json.dumps(reviewed_data)
         if item_mapping is not None:
             self.item_mapping = item_mapping if isinstance(item_mapping, str) else json.dumps(item_mapping)
@@ -88,6 +113,12 @@ class AIProcurementJob(Document):
             frappe.throw(
                 f"Cannot pre-create items in status '{self.status}'. "
                 "Only jobs in 'Awaiting Review' can pre-create items."
+            )
+
+        if not frappe.has_permission("Item", ptype="create"):
+            frappe.throw(
+                "You do not have permission to create Items.",
+                frappe.PermissionError,
             )
 
         data = json.loads(self.reviewed_data or self.consensus_data or "{}")
