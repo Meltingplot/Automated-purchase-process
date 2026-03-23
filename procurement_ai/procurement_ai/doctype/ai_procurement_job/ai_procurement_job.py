@@ -30,7 +30,7 @@ class AIProcurementJob(Document):
             frappe.throw(f"Cannot process job in status '{self.status}'")
 
         # Verify the user has permissions to create all document types
-        from ..api.ingest import _check_creation_permissions
+        from ...api.ingest import _check_creation_permissions
 
         _check_creation_permissions()
 
@@ -61,7 +61,7 @@ class AIProcurementJob(Document):
             )
 
         # Verify the job owner has permissions to create all document types
-        from ..api.ingest import _check_creation_permissions
+        from ...api.ingest import _check_creation_permissions
 
         _check_creation_permissions(user=self.owner)
 
