@@ -14,6 +14,12 @@ def get_job_status(job_name: str) -> dict:
 
     Returns status, confidence, and links to created documents.
     """
+    if not frappe.has_permission("AI Procurement Job", ptype="read"):
+        frappe.throw(
+            "You do not have permission to view AI Procurement Jobs",
+            frappe.PermissionError,
+        )
+
     job = frappe.get_doc("AI Procurement Job", job_name)
 
     return {

@@ -97,7 +97,7 @@ function render_recent_jobs(page, jobs) {
                 '<span class="indicator-pill ' + color + ' filterable ellipsis">' +
                 '<span class="ellipsis">' + __(job.status) + "</span></span> " +
                 "<strong>" + job.name + "</strong>" +
-                " &mdash; " + (job.detected_type || job.source_type || "") +
+                " &mdash; " + frappe.utils.escape_html(job.detected_type || job.source_type || "") +
                 ' <span class="text-muted pull-right">' +
                 confidence + " | " + frappe.datetime.prettyDate(job.creation) +
                 "</span></a></div>";
@@ -123,11 +123,11 @@ function render_escalations(page, escalations) {
                 '<div class="escalation-card" style="padding:10px;margin:5px 0;' +
                 'border-radius:6px;background:var(--subtle-fg);">' +
                 '<a href="/app/ai-procurement-job/' + esc.procurement_job + '">' +
-                "<strong>" + esc.procurement_job + "</strong></a>" +
+                "<strong>" + frappe.utils.escape_html(esc.procurement_job) + "</strong></a>" +
                 '<span class="badge badge-warning pull-right">' +
-                esc.escalation_type + "</span>" +
+                frappe.utils.escape_html(esc.escalation_type) + "</span>" +
                 '<div class="text-muted" style="margin-top:4px;font-size:0.9em;">' +
-                (esc.reason || "").substring(0, 100) +
+                frappe.utils.escape_html((esc.reason || "").substring(0, 100)) +
                 "</div></div>";
         });
     }

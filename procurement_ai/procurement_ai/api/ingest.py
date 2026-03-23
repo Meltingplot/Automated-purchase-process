@@ -18,6 +18,33 @@ import frappe
 
 logger = logging.getLogger(__name__)
 
+# All DocTypes the pipeline may create — checked at entry points
+_REQUIRED_CREATE_DOCTYPES = [
+    "AI Procurement Job",
+    "Supplier",
+    "Purchase Order",
+    "Purchase Receipt",
+    "Purchase Invoice",
+    "Item",
+]
+
+
+def _check_creation_permissions(user=None):
+    """Check that the user has 'create' permission on all DocTypes the pipeline may create.
+
+    Raises frappe.PermissionError if any permission is missing.
+    """
+    missing = []
+    for dt in _REQUIRED_CREATE_DOCTYPES:
+        if not frappe.has_permission(dt, ptype="create", user=user):
+            missing.append(dt)
+    if missing:
+        frappe.throw(
+            f"You do not have permission to create: {', '.join(missing)}. "
+            "All document creation permissions are required to use AI Procurement.",
+            frappe.PermissionError,
+        )
+
 
 @frappe.whitelist()
 def process(source_type: str = "Auto-Detect"):
@@ -29,11 +56,7 @@ def process(source_type: str = "Auto-Detect"):
     Expects a file upload in the request. Creates an AI Procurement Job
     and enqueues background processing.
     """
-    if not frappe.has_permission("AI Procurement Job", ptype="create"):
-        frappe.throw(
-            "You do not have permission to create AI Procurement Jobs",
-            frappe.PermissionError,
-        )
+    _check_creation_permissions()
 
     # Get uploaded file
     uploaded_file = frappe.request.files.get("file")
@@ -240,10 +263,15 @@ def run_extraction_pipeline(procurement_job_name: str):
     except Exception as e:
         logger.error(f"Job {job_name}: Pipeline error: {e}\n{traceback.format_exc()}")
 
+        _safe_error_msg = (
+            "An error occurred during document processing. "
+            "Check server logs or contact your administrator."
+        )
+
         try:
             job = frappe.get_doc("AI Procurement Job", job_name)
             job.status = "Error"
-            job.escalation_reason = str(e)[:2000]
+            job.escalation_reason = _safe_error_msg
             job.save()
             frappe.db.commit()
         except Exception:
@@ -251,7 +279,7 @@ def run_extraction_pipeline(procurement_job_name: str):
 
         frappe.publish_realtime(
             "ai_procurement_progress",
-            {"job": job_name, "stage": "error", "error": str(e)},
+            {"job": job_name, "stage": "error", "error": _safe_error_msg},
             doctype="AI Procurement Job",
             docname=job_name,
             after_commit=True,
@@ -340,6 +368,19 @@ def run_chain_from_review(procurement_job_name: str):
         else:
             consensus_data = json.loads(job.consensus_data or "{}")
 
+        # Validate consensus data against the extraction schema
+        from ...llm.schemas import ExtractedDocument
+        from pydantic import ValidationError as PydanticValidationError
+
+        try:
+            ExtractedDocument.model_validate(consensus_data)
+        except PydanticValidationError as e:
+            logger.error(f"Job {job_name}: data failed schema validation: {e}")
+            raise ValueError(
+                "Extracted data does not conform to the expected schema. "
+                "Please re-process the document."
+            )
+
         # Parse item_mapping (JSON: {"0": "ITEM-001", "1": null, ...})
         item_mapping = None
         if job.item_mapping:
@@ -385,10 +426,15 @@ def run_chain_from_review(procurement_job_name: str):
     except Exception as e:
         logger.error(f"Job {job_name}: Chain from review error: {e}\n{traceback.format_exc()}")
 
+        _safe_error_msg = (
+            "An error occurred during document creation. "
+            "Check server logs or contact your administrator."
+        )
+
         try:
             job = frappe.get_doc("AI Procurement Job", job_name)
             job.status = "Error"
-            job.escalation_reason = str(e)[:2000]
+            job.escalation_reason = _safe_error_msg
             job.save()
             frappe.db.commit()
         except Exception:
@@ -396,7 +442,7 @@ def run_chain_from_review(procurement_job_name: str):
 
         frappe.publish_realtime(
             "ai_procurement_progress",
-            {"job": job_name, "stage": "error", "error": str(e)},
+            {"job": job_name, "stage": "error", "error": _safe_error_msg},
             doctype="AI Procurement Job",
             docname=job_name,
             after_commit=True,

@@ -14,7 +14,7 @@ import unicodedata
 # Maximum text length sent to LLMs
 MAX_TEXT_LENGTH = 50_000
 
-# Known prompt injection patterns (detect, warn, but don't remove)
+# Known prompt injection patterns (detect and reject)
 INJECTION_PATTERNS = [
     r"ignore\s+(previous|above|all)\s+(instructions?|prompts?)",
     r"you\s+are\s+now\s+",
@@ -54,6 +54,12 @@ INVISIBLE_CHARS = frozenset(
 )
 
 
+class PromptInjectionError(Exception):
+    """Raised when prompt injection patterns are detected in input text."""
+
+    pass
+
+
 class InputSanitizer:
     """
     Multi-stage input sanitization before text reaches any LLM.
@@ -61,7 +67,7 @@ class InputSanitizer:
     Pipeline:
     1. Unicode normalization (NFKC) - defeats homoglyph attacks
     2. Invisible character removal - defeats zero-width injection
-    3. Injection pattern scanning - warns but does not remove
+    3. Injection pattern scanning - rejects document on detection
     4. Length truncation - prevents context overflow
     """
 
@@ -72,6 +78,9 @@ class InputSanitizer:
 
         Returns:
             (sanitized_text, list_of_warnings)
+
+        Raises:
+            PromptInjectionError: If prompt injection patterns are detected.
         """
         warnings: list[str] = []
 
@@ -81,10 +90,17 @@ class InputSanitizer:
         # 2. Remove invisible characters
         text = cls._remove_invisible_chars(text)
 
-        # 3. Scan for injection patterns (warn only, don't alter text)
+        # 3. Scan for injection patterns — reject on detection
+        detected = []
         for pattern in INJECTION_PATTERNS:
             if re.search(pattern, text, re.IGNORECASE):
-                warnings.append(f"Potential injection pattern detected: {pattern}")
+                detected.append(pattern)
+
+        if detected:
+            raise PromptInjectionError(
+                f"Potential prompt injection detected: {len(detected)} suspicious "
+                "pattern(s) found. The document has been rejected for security reasons."
+            )
 
         # 4. Truncate overly long text
         if len(text) > MAX_TEXT_LENGTH:
