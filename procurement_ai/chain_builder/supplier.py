@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 import frappe
+from frappe import _
 
 from ..validation.supplier_matcher import SupplierMatcher
 
@@ -163,8 +164,8 @@ def _get_default_supplier_group() -> str:
         return groups[0]["name"]
 
     frappe.throw(
-        "No Supplier Group found. Please create at least one Supplier Group "
-        "or set a default in Buying Settings."
+        _("No Supplier Group found. Please create at least one Supplier Group "
+          "or set a default in Buying Settings.")
     )
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 
 import frappe
+from frappe import _
 from frappe.utils import today
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def create_purchase_receipt(
         stock_uom_mapping=stock_uom_mapping,
     )
     if not items:
-        frappe.throw("Cannot create Purchase Receipt without line items")
+        frappe.throw(_("Cannot create Purchase Receipt without line items"))
 
     # Retrospective documents must not be dated later than the source document
     doc_date = extracted_data.get("document_date") or today()
