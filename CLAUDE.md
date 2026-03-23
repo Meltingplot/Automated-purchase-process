@@ -188,7 +188,7 @@ Local LLMs via `ChatOpenAI` with custom `base_url`: Ollama, vLLM, llama.cpp, LM 
 
 Trust levels for local LLMs: `full` (1.0 weight, 70B+), `reduced` (0.5, 13B-70B), `validation_only` (0.0, <13B).
 
-Minimum 2 active providers required for consensus (unless `development_mode` is enabled).
+Minimum 1 active provider required. Single-provider operation is allowed but forces human review (no auto-acceptance without consensus). With 2+ providers, the `require_document_review` setting controls whether review is optional.
 
 ### Security Layers
 
