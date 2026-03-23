@@ -105,8 +105,10 @@ def _build_receipt_items(
     from .purchase_order import (
         _adjust_bulk_uom,
         _ensure_numeric_uom_setup,
+        _ensure_supplier_link,
         _resolve_item,
         _resolve_uom,
+        _sanitize_code,
         _true_unit_price,
     )
 
@@ -115,6 +117,10 @@ def _build_receipt_items(
         po_linked_code = po_item_links[idx]["item_code"] if po_item_links and idx in po_item_links else None
         mapped_code = item_mapping.get(idx) if item_mapping else None
         item_code = po_linked_code or mapped_code or _resolve_item(item, settings, supplier, stock_uom=(stock_uom_mapping.get(idx) if stock_uom_mapping else None))
+        # Ensure supplier link for user-mapped or PO-linked items
+        if po_linked_code or mapped_code:
+            extracted_code = _sanitize_code(item.get("item_code", ""))
+            _ensure_supplier_link(item_code, supplier, extracted_code)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
         uom_raw = item.get("uom") or ""
