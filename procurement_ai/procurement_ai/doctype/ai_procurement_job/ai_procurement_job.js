@@ -77,7 +77,9 @@ frappe.ui.form.on("AI Procurement Job", {
                     }
                 ).addClass("btn-primary");
             } else {
-                // Escalation — no docs created yet
+                // Escalation — no docs created yet, show formatted summary
+                _render_needs_review_summary(frm);
+
                 frm.add_custom_button(
                     __("Approve & Create"),
                     function () {
