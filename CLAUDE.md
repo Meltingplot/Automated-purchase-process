@@ -30,10 +30,13 @@ bench restart                    # restart workers after code changes
 
 ```
 Upload (PDF/Image/Email)
+  -> Text + page images extracted (pdfplumber for PDFs, PIL for images)
   -> InputSanitizer (NFKC normalize, strip invisible chars, injection scan)
-  -> OCR (pdfplumber + Tesseract/EasyOCR)
-  -> Document Classification (LLM)
+  -> Conventional OCR baseline (Tesseract/EasyOCR on page images, cross-check only)
+  -> Document Classification (via LLM consensus on document_type field)
   -> Parallel LLM Extraction (Claude / OpenAI / Gemini / Local)
+     Cloud LLMs receive page images (vision) + text as supplementary context
+     Local LLMs receive text only (vision support varies)
   -> OutputGuard (JSON extraction, Pydantic validation, plausibility checks)
   -> ConsensusEngine (field-by-field majority voting, OCR cross-check)
   -> Validation (confidence threshold, required fields)

@@ -154,7 +154,7 @@ def build_extraction_messages(
     is_local: bool = False,
 ) -> list[dict]:
     """
-    Build the message list for an extraction LLM call.
+    Build the message list for an extraction LLM call (text-only).
 
     Args:
         sanitized_text: Pre-sanitized document text
@@ -179,6 +179,72 @@ def build_extraction_messages(
     return [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
+    ]
+
+
+# ============================================================
+# Vision-aware extraction prompt
+# ============================================================
+
+VISION_EXTRACTION_USER_TEMPLATE = """Analyze the attached document image(s) and extract the data according to the specified schema.
+
+Document type hint: {type_hint}
+
+The following text was extracted from the document. Use the images as the PRIMARY source and this text as supplementary context — the images may contain details that text extraction missed.
+
+--- BEGIN EXTRACTED TEXT (SUPPLEMENTARY CONTEXT) ---
+{sanitized_text}
+--- END EXTRACTED TEXT ---
+
+Extract the structured data as JSON."""
+
+
+def build_vision_extraction_messages(
+    sanitized_text: str,
+    images: list[bytes],
+    type_hint: str = "Auto-Detect",
+) -> list[dict]:
+    """
+    Build multimodal messages with document images for vision-capable LLMs.
+
+    The images are sent as the primary source for extraction. The OCR/pdfplumber
+    text is included as supplementary context so the LLM can cross-reference,
+    but the images take precedence (OCR can introduce errors on scanned docs).
+
+    Args:
+        sanitized_text: Pre-sanitized document text (supplementary)
+        images: List of PNG image bytes (page images)
+        type_hint: Document type hint from user
+
+    Returns:
+        List of message dicts. The user message has a list of content blocks
+        (text + images) for LangChain multimodal support.
+    """
+    import base64
+
+    system_prompt = EXTRACTION_SYSTEM_PROMPT.format(schema=_get_schema_str())
+
+    user_text = VISION_EXTRACTION_USER_TEMPLATE.format(
+        type_hint=type_hint,
+        sanitized_text=sanitized_text,
+    )
+
+    # Build multimodal content blocks: text instruction + page images
+    content_blocks: list[dict] = [{"type": "text", "text": user_text}]
+
+    # Limit to first 5 pages to control cost/latency
+    for i, img_bytes in enumerate(images[:5]):
+        b64_data = base64.b64encode(img_bytes).decode("utf-8")
+        content_blocks.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{b64_data}"},
+            }
+        )
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": content_blocks},
     ]
 
 

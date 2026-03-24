@@ -17,7 +17,7 @@ from .consensus import ConsensusEngine
 from .local_trust import LocalLLMTrustPolicy
 from .models import LLMProviderFactory
 from .output_guard import OutputGuard
-from .prompts import build_extraction_messages
+from .prompts import build_extraction_messages, build_vision_extraction_messages
 from .sanitizer import InputSanitizer
 
 logger = logging.getLogger(__name__)
@@ -124,15 +124,34 @@ def llm_extraction_node_factory(provider: str) -> Callable:
 
         is_local = provider == "local"
         type_hint = state.get("source_type_hint", "Auto-Detect")
+        images = state.get("document_images", [])
 
-        messages = build_extraction_messages(
-            sanitized_text=state.get("raw_text", ""),
-            type_hint=type_hint,
-            is_local=is_local,
-        )
+        # Use vision for cloud providers when images are available
+        use_vision = images and not is_local
+
+        if use_vision:
+            messages = build_vision_extraction_messages(
+                sanitized_text=state.get("raw_text", ""),
+                images=images,
+                type_hint=type_hint,
+            )
+        else:
+            messages = build_extraction_messages(
+                sanitized_text=state.get("raw_text", ""),
+                type_hint=type_hint,
+                is_local=is_local,
+            )
+
+        if use_vision:
+            logger.info(
+                f"Job {job_name}: {provider} using vision with "
+                f"{min(len(images), 5)} page image(s)"
+            )
 
         start_time = time.time()
         try:
+            # HumanMessage content is a string (text-only) or a list of
+            # text + image_url blocks (vision). LangChain handles both.
             langchain_messages = [
                 SystemMessage(content=messages[0]["content"]),
                 HumanMessage(content=messages[1]["content"]),

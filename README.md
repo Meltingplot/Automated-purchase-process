@@ -42,10 +42,12 @@ This plugin eliminates steps 2-4. Upload the document, review the AI extraction 
 ```
   ┌───────────────────────────────────────────────────────────────────┐
   │  1. Upload          PDF, image, or email attachment               │
-  │  2. Extract Text    pdfplumber pulls text + page images from PDF  │
+  │  2. Extract         pdfplumber pulls text + page images from PDF  │
   │  3. Sanitize        Strip invisible chars, detect injection       │
-  │  4. OCR Baseline    Tesseract/EasyOCR runs on page images         │
-  │  5. Extract (LLM)   Text sent to 2-3 LLM providers in parallel   │
+  │  4. OCR Baseline    Tesseract/EasyOCR runs on page images as an  │
+  │                     independent cross-check (not primary source)  │
+  │  5. Extract (LLM)   Page images + text sent to 2-3 LLM providers │
+  │                     in parallel — LLMs read the document directly │
   │  6. Validate        JSON schema + arithmetic plausibility         │
   │  7. Consensus       Field-by-field majority voting + OCR cross-   │
   │                     check against the independent OCR baseline    │
@@ -55,7 +57,9 @@ This plugin eliminates steps 2-4. Upload the document, review the AI extraction 
   └───────────────────────────────────────────────────────────────────┘
 ```
 
-The extracted text is sent to multiple LLMs independently. A consensus engine then votes field-by-field across all LLM outputs and cross-checks the results against a conventional OCR baseline. This means no single LLM hallucination can corrupt your data, and OCR serves as an independent verification layer.
+Cloud LLMs (Claude, GPT-4o, Gemini) receive the actual document images via their vision capabilities, so they read the document directly — just like a human would. The extracted text from pdfplumber is included as supplementary context. A separate OCR pass (Tesseract/EasyOCR) runs independently as a cross-check baseline for the consensus engine.
+
+Multiple LLMs extract data independently, then a consensus engine votes field-by-field to produce the most accurate result. No single LLM hallucination can corrupt your data.
 
 ---
 
