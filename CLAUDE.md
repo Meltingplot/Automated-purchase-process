@@ -199,7 +199,7 @@ Minimum 1 active provider required. Single-provider operation is allowed but for
 ### Security Layers
 
 1. **InputSanitizer** -- NFKC normalization, invisible char removal, injection pattern detection (13 patterns)
-2. **Prompt isolation** -- document content in `--- BEGIN/END DOCUMENT DATA ---` block, never in instructions
+2. **Prompt isolation** -- text content in `--- BEGIN/END DOCUMENT DATA ---` block in user message, never in instructions. For vision extraction, page images are sent as separate `image_url` content blocks in the same user message (structurally separated, not text-delimited). System prompt instructs LLM to treat document content as data, not instructions.
 3. **OutputGuard** -- JSON extraction, Pydantic schema validation, arithmetic plausibility checks
 4. **ConsensusEngine** -- multi-LLM voting makes single-provider manipulation ineffective
 5. **Local LLM Trust** -- configurable weight reduction for smaller/more vulnerable models
