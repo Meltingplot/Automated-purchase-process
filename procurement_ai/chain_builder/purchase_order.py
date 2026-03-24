@@ -263,64 +263,108 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
 
     # VAT rows — "On Previous Row Total" if shipping exists, else "On Net Total"
     if tax_rates:
-        tax_account = _get_tax_account(company)
-        if tax_account:
-            for rate in sorted(tax_rates):
-                if rate <= 0:
-                    continue
-                tax_row = {
-                    "account_head": tax_account,
-                    "rate": rate,
-                    "description": f"VAT {rate:.1f}%",
-                }
-                if has_actual_rows:
-                    tax_row["charge_type"] = "On Previous Row Total"
-                    tax_row["row_id"] = len(taxes)  # references last Actual row
-                else:
-                    tax_row["charge_type"] = "On Net Total"
-                taxes.append(tax_row)
+        for rate in sorted(tax_rates):
+            if rate <= 0:
+                continue
+            tax_account = _get_tax_account(company, rate)
+            if not tax_account:
+                logger.warning(
+                    "No tax account found for rate %.1f%% in company %r — skipping row",
+                    rate,
+                    company,
+                )
+                continue
+            tax_row = {
+                "account_head": tax_account,
+                "rate": rate,
+                "description": f"VAT {rate:.1f}%",
+            }
+            if has_actual_rows:
+                tax_row["charge_type"] = "On Previous Row Total"
+                tax_row["row_id"] = len(taxes)  # references last Actual row
+            else:
+                tax_row["charge_type"] = "On Net Total"
+            taxes.append(tax_row)
 
     return taxes
 
 
-def _get_tax_account(company: str) -> str | None:
-    """Find the tax account for the company."""
+def _get_tax_account(company: str, tax_rate: float) -> str | None:
+    """Find the correct tax account for the given *tax_rate* and *company*.
+
+    German accounting law requires each VAT rate to be booked on its own
+    dedicated account (e.g. 1576 for 19 % Vorsteuer, 1571 for 7 %).  Booking
+    to the wrong account means the tax is legally owed even when it shouldn't
+    be, so this function must return the rate-specific account — never a random
+    tax account.
+
+    Lookup strategy:
+
+    1. **Default Purchase Taxes and Charges Template** — look for a row whose
+       ``rate`` matches *tax_rate*.  This is the most reliable source because
+       the user has explicitly configured it.
+    2. **Any Purchase Taxes and Charges Template for the company** — same
+       rate-matching logic, in case the default template doesn't cover the
+       requested rate but another template does.
+    3. **No fallback** — if no rate-matched account is found we return
+       ``None`` so the caller can skip the row (and log a warning) rather
+       than silently booking to a wrong account.
+    """
     if not company:
         return None
 
-    # Check if there's a default Purchase Taxes and Charges Template
-    # and get its account
+    rate_tolerance = 0.01  # floating-point comparison tolerance
+
+    # ------------------------------------------------------------------
+    # 1. Default template — match by rate
+    # ------------------------------------------------------------------
     default_template = frappe.db.get_value(
         "Purchase Taxes and Charges Template",
         {"company": company, "is_default": 1},
         "name",
     )
     if default_template:
-        accounts = frappe.get_all(
+        rows = frappe.get_all(
             "Purchase Taxes and Charges",
             filters={"parent": default_template},
-            fields=["account_head"],
-            limit=1,
+            fields=["account_head", "rate"],
         )
-        if accounts:
-            return accounts[0]["account_head"]
+        for row in rows:
+            try:
+                if abs(float(row["rate"]) - tax_rate) < rate_tolerance:
+                    return row["account_head"]
+            except (TypeError, ValueError):
+                continue
 
-    # Fall back to first tax account for the company
-    accounts = frappe.get_all(
-        "Account",
-        filters={
-            "account_type": "Tax",
-            "is_group": 0,
-            "company": company,
-        },
+    # ------------------------------------------------------------------
+    # 2. Any template for this company — match by rate
+    # ------------------------------------------------------------------
+    all_templates = frappe.get_all(
+        "Purchase Taxes and Charges Template",
+        filters={"company": company},
         fields=["name"],
-        limit=1,
-        order_by="creation asc",
     )
-    if accounts:
-        return accounts[0]["name"]
+    for tmpl in all_templates:
+        if tmpl["name"] == default_template:
+            continue  # already checked above
+        rows = frappe.get_all(
+            "Purchase Taxes and Charges",
+            filters={"parent": tmpl["name"]},
+            fields=["account_head", "rate"],
+        )
+        for row in rows:
+            try:
+                if abs(float(row["rate"]) - tax_rate) < rate_tolerance:
+                    return row["account_head"]
+            except (TypeError, ValueError):
+                continue
 
-    logger.warning(f"No tax account found for company {company!r}")
+    logger.warning(
+        "No tax account found for rate %.1f%% in company %r — "
+        "check your Purchase Taxes and Charges Templates",
+        tax_rate,
+        company,
+    )
     return None
 
 
