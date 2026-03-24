@@ -30,10 +30,16 @@ bench restart                    # restart workers after code changes
 
 ```
 Upload (PDF/Image/Email)
+  -> Text + page images extracted (pdfplumber for PDFs, PIL for images)
+  -> Native text detection (is_native_text flag: >=50% pages have rich text)
   -> InputSanitizer (NFKC normalize, strip invisible chars, injection scan)
-  -> OCR (pdfplumber + Tesseract/EasyOCR)
-  -> Document Classification (LLM)
+  -> Conventional OCR baseline (Tesseract/EasyOCR on page images, cross-check only)
+  -> Document Classification (via LLM consensus on document_type field)
   -> Parallel LLM Extraction (Claude / OpenAI / Gemini / Local)
+     Strategy depends on document type:
+       Native text PDF (e-invoices, digital docs): text as primary source
+       Scanned PDF / images: page images via vision as primary source
+     Local LLMs always receive text only (vision support varies)
   -> OutputGuard (JSON extraction, Pydantic validation, plausibility checks)
   -> ConsensusEngine (field-by-field majority voting, OCR cross-check)
   -> Validation (confidence threshold, required fields)

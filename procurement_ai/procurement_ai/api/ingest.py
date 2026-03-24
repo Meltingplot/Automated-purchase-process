@@ -135,7 +135,7 @@ def run_extraction_pipeline(procurement_job_name: str):
         settings = settings_doc.get_settings_dict()
 
         # Step 1: Extract text from document
-        raw_text, images = _extract_document(job, settings)
+        raw_text, images, is_native_text = _extract_document(job, settings)
         # Strip null bytes / control chars from OCR text before storing
         import re as _re
 
@@ -160,6 +160,7 @@ def run_extraction_pipeline(procurement_job_name: str):
         initial_state = {
             "raw_text": raw_text,
             "document_images": images,
+            "is_native_text": is_native_text,
             "source_type_hint": job.source_type or "Auto-Detect",
             "source_file_url": job.source_document_url or job.source_document,
             "job_name": job_name,
@@ -477,8 +478,16 @@ def process_pending_jobs():
         )
 
 
-def _extract_document(job, settings: dict) -> tuple[str, list[bytes]]:
-    """Extract text and images from the uploaded document."""
+def _extract_document(job, settings: dict) -> tuple[str, list[bytes], bool]:
+    """
+    Extract text and images from the uploaded document.
+
+    Returns:
+        Tuple of (text, images, is_native_text).
+        is_native_text is True for text-rich PDFs (e-invoices, digital PDFs)
+        where the extracted text is reliable and should be the primary source.
+        False for scanned PDFs and images where vision should be primary.
+    """
     file_url = job.source_document_url or job.source_document
     if not file_url:
         frappe.throw(_("No source document attached to job"))
@@ -501,7 +510,7 @@ def _extract_document(job, settings: dict) -> tuple[str, list[bytes]]:
         engine = OCREngine(engine_name=settings.get("ocr_engine", "Tesseract"))
         parser = PDFParser(ocr_engine=engine)
         result = parser.extract(file_path)
-        return result.text, result.images
+        return result.text, result.images, result.is_native_text
 
     elif ext in (".png", ".jpg", ".jpeg", ".tiff", ".tif"):
         from PIL import Image
@@ -516,7 +525,8 @@ def _extract_document(job, settings: dict) -> tuple[str, list[bytes]]:
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
-        return text, [buffer.getvalue()]
+        # Images are never native text — OCR is unreliable, vision is primary
+        return text, [buffer.getvalue()], False
 
     else:
         frappe.throw(f"Unsupported file type: {ext}")
