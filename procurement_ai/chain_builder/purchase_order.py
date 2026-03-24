@@ -330,7 +330,7 @@ def _get_shipping_account(company: str) -> str | None:
         return None
 
     # Try to find a shipping/freight specific account
-    for keyword in ("bezugsnebenkosten", "bezugsnk", "shipping", "freight", "versand", "fracht", "transport"):
+    for keyword in ("bezugsnebenkosten", "bezugsnk", "delivery costs", "shipping", "freight", "versand", "fracht", "transport"):
         accounts = frappe.get_all(
             "Account",
             filters={
