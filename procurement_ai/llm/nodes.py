@@ -17,7 +17,7 @@ from .consensus import ConsensusEngine
 from .local_trust import LocalLLMTrustPolicy
 from .models import LLMProviderFactory
 from .output_guard import OutputGuard
-from .prompts import build_extraction_messages
+from .prompts import build_extraction_messages, build_vision_extraction_messages
 from .sanitizer import InputSanitizer
 
 logger = logging.getLogger(__name__)
@@ -124,15 +124,45 @@ def llm_extraction_node_factory(provider: str) -> Callable:
 
         is_local = provider == "local"
         type_hint = state.get("source_type_hint", "Auto-Detect")
+        images = state.get("document_images", [])
+        is_native_text = state.get("is_native_text", False)
 
-        messages = build_extraction_messages(
-            sanitized_text=state.get("raw_text", ""),
-            type_hint=type_hint,
-            is_local=is_local,
-        )
+        # Decide extraction strategy:
+        # - Native text PDFs (e-invoices, digital docs): text is reliable,
+        #   use it as primary source — no need for expensive vision calls
+        # - Scanned PDFs / images: OCR text is error-prone,
+        #   send original images to LLMs via vision for accurate extraction
+        # - Local LLMs: always text-only (vision support varies)
+        use_vision = images and not is_local and not is_native_text
+
+        if use_vision:
+            messages = build_vision_extraction_messages(
+                sanitized_text=state.get("raw_text", ""),
+                images=images,
+                type_hint=type_hint,
+            )
+        else:
+            messages = build_extraction_messages(
+                sanitized_text=state.get("raw_text", ""),
+                type_hint=type_hint,
+                is_local=is_local,
+            )
+
+        if use_vision:
+            logger.info(
+                f"Job {job_name}: {provider} using vision with "
+                f"{min(len(images), 5)} page image(s) (scanned/image document)"
+            )
+        elif images and not is_local:
+            logger.info(
+                f"Job {job_name}: {provider} using text-primary mode "
+                f"(native text PDF detected)"
+            )
 
         start_time = time.time()
         try:
+            # HumanMessage content is a string (text-only) or a list of
+            # text + image_url blocks (vision). LangChain handles both.
             langchain_messages = [
                 SystemMessage(content=messages[0]["content"]),
                 HumanMessage(content=messages[1]["content"]),

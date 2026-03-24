@@ -5,6 +5,7 @@ API endpoints for job status queries.
 from __future__ import annotations
 
 import frappe
+from frappe import _
 
 
 @frappe.whitelist()
@@ -16,7 +17,7 @@ def get_job_status(job_name: str) -> dict:
     """
     if not frappe.has_permission("AI Procurement Job", ptype="read"):
         frappe.throw(
-            "You do not have permission to view AI Procurement Jobs",
+            _("You do not have permission to view AI Procurement Jobs"),
             frappe.PermissionError,
         )
 
@@ -45,7 +46,7 @@ def get_dashboard_stats() -> dict:
     """
     if not frappe.has_permission("AI Procurement Job", ptype="read"):
         frappe.throw(
-            "You do not have permission to view AI Procurement Jobs",
+            _("You do not have permission to view AI Procurement Jobs"),
             frappe.PermissionError,
         )
 

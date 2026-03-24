@@ -30,6 +30,7 @@ class ExtractionState(TypedDict):
     # Input
     raw_text: str
     document_images: list[bytes]
+    is_native_text: bool  # True for text-rich PDFs, False for scanned/image docs
     source_type_hint: str | None
     source_file_url: str
     job_name: str

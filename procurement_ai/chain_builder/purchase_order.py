@@ -9,6 +9,7 @@ import math
 import re
 
 import frappe
+from frappe import _
 from frappe.utils import flt, round_based_on_smallest_currency_fraction, today
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ def create_purchase_order(
     """
     items = _build_items(extracted_data, settings, supplier, item_mapping=item_mapping, stock_uom_mapping=stock_uom_mapping)
     if not items:
-        frappe.throw("Cannot create Purchase Order without line items")
+        frappe.throw(_("Cannot create Purchase Order without line items"))
 
     # Retrospective documents must not be dated later than the source document
     doc_date = extracted_data.get("document_date") or today()
@@ -141,7 +142,13 @@ def _build_items(
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
         stock_uom = stock_uom_mapping.get(idx) if stock_uom_mapping else None
-        item_code = mapped_code if mapped_code else _resolve_item(item, settings, supplier, stock_uom=stock_uom)
+        if mapped_code:
+            item_code = mapped_code
+            # User-mapped item — ensure supplier link exists on the item
+            extracted_code = _sanitize_code(item.get("item_code", ""))
+            _ensure_supplier_link(item_code, supplier, extracted_code)
+        else:
+            item_code = _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
         rate = _true_unit_price(item, qty)
         uom_raw = item.get("uom") or ""
@@ -711,8 +718,8 @@ def _get_default_item_group() -> str:
         return groups[0]["name"]
 
     frappe.throw(
-        "No Item Group found. Please create at least one Item Group "
-        "or set a default in Stock Settings."
+        _("No Item Group found. Please create at least one Item Group "
+          "or set a default in Stock Settings.")
     )
 
 
@@ -768,10 +775,59 @@ def _resolve_item(item: dict, settings: dict, supplier: str = "", stock_uom: str
     match = _try_resolve_item(item, settings, supplier)
     if match:
         logger.info(f"Item resolved to existing: {match}")
+        extracted_code = _sanitize_code(item.get("item_code", ""))
+        _ensure_supplier_link(match, supplier, extracted_code)
         return match
 
     # Step 4: Create new item
     return _create_item(item, supplier, settings, stock_uom=stock_uom)
+
+
+def _ensure_supplier_link(item_code: str, supplier: str, supplier_part_no: str) -> None:
+    """Ensure the Item has an Item Supplier row for the given supplier.
+
+    If the supplier is already linked, update the ``supplier_part_no`` when
+    the existing row has no part number but the extracted data provides one.
+    If the supplier is not linked at all, append a new ``supplier_items`` row.
+
+    This is intentionally a no-op when *supplier* is empty (no supplier
+    context) or when *item_code* is empty (nothing to link to).
+    """
+    if not supplier or not item_code:
+        return
+
+    # Check existing supplier rows on the Item
+    existing_rows = frappe.get_all(
+        "Item Supplier",
+        filters={"parent": item_code, "supplier": supplier},
+        fields=["name", "supplier_part_no"],
+        limit=1,
+    )
+
+    if existing_rows:
+        row = existing_rows[0]
+        # Update supplier_part_no if the existing row is blank and we have one
+        if supplier_part_no and not row.get("supplier_part_no"):
+            frappe.db.set_value(
+                "Item Supplier", row["name"], "supplier_part_no", supplier_part_no
+            )
+            logger.info(
+                f"Updated supplier_part_no={supplier_part_no!r} on Item {item_code!r} "
+                f"for supplier {supplier!r}"
+            )
+        return
+
+    # Supplier not linked yet — append a new row
+    item_doc = frappe.get_doc("Item", item_code)
+    supplier_row = {"supplier": supplier}
+    if supplier_part_no:
+        supplier_row["supplier_part_no"] = supplier_part_no
+    item_doc.append("supplier_items", supplier_row)
+    item_doc.save(ignore_permissions=True)
+    logger.info(
+        f"Added supplier link on Item {item_code!r}: supplier={supplier!r}, "
+        f"supplier_part_no={supplier_part_no!r}"
+    )
 
 
 def _match_by_supplier_part_no(supplier: str, supplier_part_no: str) -> str | None:

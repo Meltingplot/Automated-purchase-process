@@ -1,6 +1,7 @@
 import json
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -36,7 +37,7 @@ class AIProcurementJob(Document):
 
         self.status = "Processing"
         self.save()
-        frappe.db.commit()  # Release row lock before enqueuing
+        frappe.db.commit()  # Release row lock before enqueuing  # nosemgrep
 
         frappe.enqueue(
             "procurement_ai.procurement_ai.api.ingest.run_extraction_pipeline",
@@ -48,7 +49,7 @@ class AIProcurementJob(Document):
         frappe.msgprint(f"Processing started for {self.name}", alert=True)
 
     @frappe.whitelist()
-    def approve_and_create(self, reviewed_data=None, item_mapping=None, stock_uom_mapping=None):
+    def approve_and_create(self, reviewed_data: str | None = None, item_mapping: str | None = None, stock_uom_mapping: str | None = None):
         """Approve reviewed data and trigger document chain creation.
 
         Accepts review data inline to avoid a separate save round-trip
@@ -76,9 +77,9 @@ class AIProcurementJob(Document):
                 ExtractedDocument.model_validate(data)
             except PydanticValidationError as e:
                 frappe.throw(
-                    f"Reviewed data failed validation: {e.error_count()} error(s). "
-                    "Please correct the data and try again.",
-                    title="Validation Error",
+                    _("Reviewed data failed validation: {0} error(s). "
+                      "Please correct the data and try again.").format(e.error_count()),
+                    title=_("Validation Error"),
                 )
 
             self.reviewed_data = reviewed_data if isinstance(reviewed_data, str) else json.dumps(reviewed_data)
@@ -89,7 +90,7 @@ class AIProcurementJob(Document):
 
         self.status = "Processing"
         self.save()
-        frappe.db.commit()  # Release row lock before enqueuing
+        frappe.db.commit()  # Release row lock before enqueuing  # nosemgrep
 
         frappe.enqueue(
             "procurement_ai.procurement_ai.api.ingest.run_chain_from_review",
@@ -117,13 +118,13 @@ class AIProcurementJob(Document):
 
         if not frappe.has_permission("Item", ptype="create"):
             frappe.throw(
-                "You do not have permission to create Items.",
+                _("You do not have permission to create Items."),
                 frappe.PermissionError,
             )
 
         data = json.loads(self.reviewed_data or self.consensus_data or "{}")
         if not data:
-            frappe.throw("No extracted data available")
+            frappe.throw(_("No extracted data available"))
 
         from ....chain_builder.retrospective import sanitize_extracted_data
         from ....chain_builder.supplier import ensure_supplier
@@ -137,6 +138,8 @@ class AIProcurementJob(Document):
 
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        if self.company:
+            settings["default_company"] = self.company
 
         results = []
         for idx, item in enumerate(clean.get("items", [])):
@@ -171,7 +174,7 @@ class AIProcurementJob(Document):
                 "created": existing is None,
             })
 
-        frappe.db.commit()
+        frappe.db.commit()  # Persist newly created Items before returning to client  # nosemgrep
         return results
 
     @frappe.whitelist()
@@ -225,6 +228,8 @@ class AIProcurementJob(Document):
 
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        if self.company:
+            settings["default_company"] = self.company
         supplier_name = supplier_match.supplier_name if supplier_match.found else ""
         invoice_currency = clean.get("currency")
 

@@ -30,10 +30,16 @@ bench restart                    # restart workers after code changes
 
 ```
 Upload (PDF/Image/Email)
+  -> Text + page images extracted (pdfplumber for PDFs, PIL for images)
+  -> Native text detection (is_native_text flag: >=50% pages have rich text)
   -> InputSanitizer (NFKC normalize, strip invisible chars, injection scan)
-  -> OCR (pdfplumber + Tesseract/EasyOCR)
-  -> Document Classification (LLM)
+  -> Conventional OCR baseline (Tesseract/EasyOCR on page images, cross-check only)
+  -> Document Classification (via LLM consensus on document_type field)
   -> Parallel LLM Extraction (Claude / OpenAI / Gemini / Local)
+     Strategy depends on document type:
+       Native text PDF (e-invoices, digital docs): text as primary source
+       Scanned PDF / images: page images via vision as primary source
+     Local LLMs always receive text only (vision support varies)
   -> OutputGuard (JSON extraction, Pydantic validation, plausibility checks)
   -> ConsensusEngine (field-by-field majority voting, OCR cross-check)
   -> Validation (confidence threshold, required fields)
@@ -71,7 +77,7 @@ When `require_document_review` is disabled, the pipeline auto-creates documents 
 
 ### DocTypes
 
-- **AI Procurement Job** (`AIPROC-####`): Central job record. Tracks status (Pending/Processing/Awaiting Review/Needs Review/Completed/Error), stores OCR text, extraction results (child table), consensus data, confidence score, reviewed_data (user-corrected JSON), item_mapping (user-selected Item codes), and links to created Supplier/PO/PR/PI. Deletion clears `ai_procurement_job` back-references on linked PO/PR/PI via `on_trash`.
+- **AI Procurement Job** (`AIPROC-####`): Central job record. Tracks status (Pending/Processing/Awaiting Review/Needs Review/Completed/Error), has a `company` field (Link to Company, required) that defaults to `AI Procurement Settings.default_company` but can be changed per job, stores OCR text, extraction results (child table), consensus data, confidence score, reviewed_data (user-corrected JSON), item_mapping (user-selected Item codes), and links to created Supplier/PO/PR/PI. All chain builders use the job's company for warehouse/account lookups. Deletion clears `ai_procurement_job` back-references on linked PO/PR/PI via `on_trash`.
 - **AI Extraction Result**: Child table of Job. One row per LLM provider with extracted_data JSON, confidence, timing, token count, deviation fields.
 - **AI Procurement Settings** (Single): All configuration -- API keys (Password fields), LLM provider settings, OCR engine choice, confidence threshold, auto-submit toggle, escalation email, local LLM config (provider/URL/model/trust level).
 - **AI Escalation Log** (`ESC-####`): Created when consensus fails. Types: Low Confidence, Field Dispute, Amount Mismatch, Supplier Unclear, OCR Mismatch, Processing Error.
@@ -193,7 +199,7 @@ Minimum 1 active provider required. Single-provider operation is allowed but for
 ### Security Layers
 
 1. **InputSanitizer** -- NFKC normalization, invisible char removal, injection pattern detection (13 patterns)
-2. **Prompt isolation** -- document content in `--- BEGIN/END DOCUMENT DATA ---` block, never in instructions
+2. **Prompt isolation** -- text content in `--- BEGIN/END DOCUMENT DATA ---` block in user message, never in instructions. For vision extraction, page images are sent as separate `image_url` content blocks in the same user message (structurally separated, not text-delimited). System prompt instructs LLM to treat document content as data, not instructions.
 3. **OutputGuard** -- JSON extraction, Pydantic schema validation, arithmetic plausibility checks
 4. **ConsensusEngine** -- multi-LLM voting makes single-provider manipulation ineffective
 5. **Local LLM Trust** -- configurable weight reduction for smaller/more vulnerable models

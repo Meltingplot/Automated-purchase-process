@@ -15,6 +15,7 @@ import os
 import traceback
 
 import frappe
+from frappe import _
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,15 @@ def _check_creation_permissions(user=None):
         )
 
 
+def _apply_job_company(settings: dict, job) -> dict:
+    """Override default_company in settings with the job's company if set."""
+    if job.company:
+        settings["default_company"] = job.company
+    return settings
+
+
 @frappe.whitelist()
-def process(source_type: str = "Auto-Detect"):
+def process(source_type: str = "Auto-Detect", company: str | None = None):
     """
     API endpoint: Upload and queue a document for processing.
 
@@ -61,7 +69,7 @@ def process(source_type: str = "Auto-Detect"):
     # Get uploaded file
     uploaded_file = frappe.request.files.get("file")
     if not uploaded_file:
-        frappe.throw("No file uploaded")
+        frappe.throw(_("No file uploaded"))
 
     filename = uploaded_file.filename
     file_content = uploaded_file.read()
@@ -84,6 +92,11 @@ def process(source_type: str = "Auto-Detect"):
     )
     file_doc.save(ignore_permissions=True)
 
+    # Resolve company: API param > settings default
+    if not company:
+        settings = frappe.get_single("AI Procurement Settings")
+        company = settings.default_company
+
     # Create AI Procurement Job
     job = frappe.get_doc(
         {
@@ -92,6 +105,7 @@ def process(source_type: str = "Auto-Detect"):
             "source_document": file_doc.file_url,
             "source_document_url": file_doc.file_url,
             "source_type": source_type,
+            "company": company,
         }
     )
     job.insert(ignore_permissions=True)
@@ -129,12 +143,13 @@ def run_extraction_pipeline(procurement_job_name: str):
         job.save()
         frappe.db.commit()
 
-        # Get settings
+        # Get settings (job-level company overrides default)
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        _apply_job_company(settings, job)
 
         # Step 1: Extract text from document
-        raw_text, images = _extract_document(job, settings)
+        raw_text, images, is_native_text = _extract_document(job, settings)
         # Strip null bytes / control chars from OCR text before storing
         import re as _re
 
@@ -159,6 +174,7 @@ def run_extraction_pipeline(procurement_job_name: str):
         initial_state = {
             "raw_text": raw_text,
             "document_images": images,
+            "is_native_text": is_native_text,
             "source_type_hint": job.source_type or "Auto-Detect",
             "source_file_url": job.source_document_url or job.source_document,
             "job_name": job_name,
@@ -321,11 +337,11 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
         stage = "completed"
 
     job.save()
-    frappe.db.commit()
+    frappe.db.commit()  # Persist status before adding comment in background job  # nosemgrep
 
     if verification:
         job.add_comment("Comment", verification)
-        frappe.db.commit()
+        frappe.db.commit()  # Persist comment before resolving escalations in background job  # nosemgrep
 
     # Auto-resolve open escalations for this job
     open_escalations = frappe.get_all(
@@ -358,9 +374,10 @@ def run_chain_from_review(procurement_job_name: str):
     try:
         job = frappe.get_doc("AI Procurement Job", job_name)
 
-        # Get settings
+        # Get settings (job-level company overrides default)
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        _apply_job_company(settings, job)
 
         # Use reviewed data if available, otherwise fall back to consensus
         if job.reviewed_data:
@@ -476,11 +493,19 @@ def process_pending_jobs():
         )
 
 
-def _extract_document(job, settings: dict) -> tuple[str, list[bytes]]:
-    """Extract text and images from the uploaded document."""
+def _extract_document(job, settings: dict) -> tuple[str, list[bytes], bool]:
+    """
+    Extract text and images from the uploaded document.
+
+    Returns:
+        Tuple of (text, images, is_native_text).
+        is_native_text is True for text-rich PDFs (e-invoices, digital PDFs)
+        where the extracted text is reliable and should be the primary source.
+        False for scanned PDFs and images where vision should be primary.
+    """
     file_url = job.source_document_url or job.source_document
     if not file_url:
-        frappe.throw("No source document attached to job")
+        frappe.throw(_("No source document attached to job"))
 
     # Get file path
     file_path = frappe.get_site_path("private", "files", os.path.basename(file_url))
@@ -500,7 +525,7 @@ def _extract_document(job, settings: dict) -> tuple[str, list[bytes]]:
         engine = OCREngine(engine_name=settings.get("ocr_engine", "Tesseract"))
         parser = PDFParser(ocr_engine=engine)
         result = parser.extract(file_path)
-        return result.text, result.images
+        return result.text, result.images, result.is_native_text
 
     elif ext in (".png", ".jpg", ".jpeg", ".tiff", ".tif"):
         from PIL import Image
@@ -515,7 +540,8 @@ def _extract_document(job, settings: dict) -> tuple[str, list[bytes]]:
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
-        return text, [buffer.getvalue()]
+        # Images are never native text — OCR is unreliable, vision is primary
+        return text, [buffer.getvalue()], False
 
     else:
         frappe.throw(f"Unsupported file type: {ext}")
@@ -542,7 +568,7 @@ def _save_extraction_results(job, pipeline_result: dict):
         )
 
     job.save()
-    frappe.db.commit()
+    frappe.db.commit()  # Persist extraction results before next pipeline stage in background job  # nosemgrep
 
 
 def _create_escalation(job, pipeline_result: dict):
