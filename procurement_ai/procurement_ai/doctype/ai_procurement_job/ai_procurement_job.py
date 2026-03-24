@@ -138,6 +138,8 @@ class AIProcurementJob(Document):
 
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        if self.company:
+            settings["default_company"] = self.company
 
         results = []
         for idx, item in enumerate(clean.get("items", [])):
@@ -226,6 +228,8 @@ class AIProcurementJob(Document):
 
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        if self.company:
+            settings["default_company"] = self.company
         supplier_name = supplier_match.supplier_name if supplier_match.found else ""
         invoice_currency = clean.get("currency")
 

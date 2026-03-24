@@ -47,8 +47,15 @@ def _check_creation_permissions(user=None):
         )
 
 
+def _apply_job_company(settings: dict, job) -> dict:
+    """Override default_company in settings with the job's company if set."""
+    if job.company:
+        settings["default_company"] = job.company
+    return settings
+
+
 @frappe.whitelist()
-def process(source_type: str = "Auto-Detect"):
+def process(source_type: str = "Auto-Detect", company: str | None = None):
     """
     API endpoint: Upload and queue a document for processing.
 
@@ -85,6 +92,11 @@ def process(source_type: str = "Auto-Detect"):
     )
     file_doc.save(ignore_permissions=True)
 
+    # Resolve company: API param > settings default
+    if not company:
+        settings = frappe.get_single("AI Procurement Settings")
+        company = settings.default_company
+
     # Create AI Procurement Job
     job = frappe.get_doc(
         {
@@ -93,6 +105,7 @@ def process(source_type: str = "Auto-Detect"):
             "source_document": file_doc.file_url,
             "source_document_url": file_doc.file_url,
             "source_type": source_type,
+            "company": company,
         }
     )
     job.insert(ignore_permissions=True)
@@ -130,9 +143,10 @@ def run_extraction_pipeline(procurement_job_name: str):
         job.save()
         frappe.db.commit()
 
-        # Get settings
+        # Get settings (job-level company overrides default)
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        _apply_job_company(settings, job)
 
         # Step 1: Extract text from document
         raw_text, images, is_native_text = _extract_document(job, settings)
@@ -360,9 +374,10 @@ def run_chain_from_review(procurement_job_name: str):
     try:
         job = frappe.get_doc("AI Procurement Job", job_name)
 
-        # Get settings
+        # Get settings (job-level company overrides default)
         settings_doc = frappe.get_single("AI Procurement Settings")
         settings = settings_doc.get_settings_dict()
+        _apply_job_company(settings, job)
 
         # Use reviewed data if available, otherwise fall back to consensus
         if job.reviewed_data:
