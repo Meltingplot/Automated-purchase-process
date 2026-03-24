@@ -19,9 +19,9 @@ frappe.ui.form.on("AI Procurement Job", {
             }).addClass("btn-primary");
         }
 
-        // Awaiting Review: render review form + approve/reject buttons
+        // Unified review UI for both Awaiting Review and Needs Review
         if (frm.doc.status === "Awaiting Review") {
-            _render_review_form(frm);
+            _render_review_ui(frm, { editable: true });
 
             frm.add_custom_button(
                 __("Approve & Create Documents"),
@@ -37,47 +37,24 @@ frappe.ui.form.on("AI Procurement Job", {
                 }
             );
 
-            frm.add_custom_button(
-                __("Reject"),
-                function () {
-                    frappe.prompt(
-                        {
-                            fieldname: "reason",
-                            fieldtype: "Small Text",
-                            label: "Rejection Reason",
-                            reqd: 1,
-                        },
-                        function (values) {
-                            frm.set_value("status", "Error");
-                            frm.set_value(
-                                "human_review_notes",
-                                "Rejected: " + values.reason
-                            );
-                            frm.save();
-                        },
-                        __("Reject Job"),
-                        __("Reject")
-                    );
-                }
-            );
+            _add_reject_button(frm);
         }
 
-        // Needs Review: post-creation verification or escalation
         if (frm.doc.status === "Needs Review") {
             var has_created_docs = frm.doc.created_po || frm.doc.created_receipt || frm.doc.created_invoice;
 
             if (has_created_docs) {
-                // Show review summary and mismatch reason
-                _render_needs_review_summary(frm);
+                _render_review_ui(frm, {
+                    editable: true,
+                    show_comparison: true,
+                    escalation_reason: frm.doc.escalation_reason,
+                });
 
-                // Post-creation verification — user checks amounts match
                 frm.add_custom_button(
                     __("Mark as Completed"),
                     function () {
                         frappe.confirm(
-                            __(
-                                "Have you verified the created documents and amounts are correct?"
-                            ),
+                            __("Have you verified the created documents and amounts are correct?"),
                             function () {
                                 frm.call("mark_completed").then(function () {
                                     frm.reload_doc();
@@ -86,59 +63,44 @@ frappe.ui.form.on("AI Procurement Job", {
                         );
                     }
                 ).addClass("btn-primary");
-            } else {
-                // Escalation — no docs created yet, show formatted summary
-                _render_needs_review_summary(frm);
 
                 frm.add_custom_button(
-                    __("Approve & Create"),
+                    __("Re-approve with Changes"),
                     function () {
-                        frappe.confirm(
-                            __(
-                                "This will create the procurement documents from the extracted data. Continue?"
-                            ),
-                            function () {
-                                frm.call("process_document").then(function () {
-                                    frm.reload_doc();
-                                });
-                            }
-                        );
-                    },
-                    __("Review")
+                        _collect_and_approve(frm);
+                    }
+                );
+            } else {
+                _render_review_ui(frm, {
+                    editable: true,
+                    escalation_reason: frm.doc.escalation_reason,
+                });
+
+                frm.add_custom_button(
+                    __("Approve & Create Documents"),
+                    function () {
+                        _collect_and_approve(frm);
+                    }
+                ).addClass("btn-primary");
+
+                frm.add_custom_button(
+                    __("Pre-create Items"),
+                    function () {
+                        _precreate_items(frm);
+                    }
                 );
             }
 
-            frm.add_custom_button(
-                __("Reject"),
-                function () {
-                    frappe.prompt(
-                        {
-                            fieldname: "reason",
-                            fieldtype: "Small Text",
-                            label: "Rejection Reason",
-                            reqd: 1,
-                        },
-                        function (values) {
-                            frm.set_value("status", "Error");
-                            frm.set_value(
-                                "human_review_notes",
-                                "Rejected: " + values.reason
-                            );
-                            frm.save();
-                        },
-                        __("Reject Job"),
-                        __("Reject")
-                    );
-                },
-                __("Review")
-            );
+            _add_reject_button(frm);
         }
 
         // Show progress indicators
         _render_status_badge(frm);
 
-        // Show created documents links
-        _render_created_docs(frm);
+        // Show created documents in dashboard for Completed status only
+        if (frm.doc.status === "Completed") {
+            _render_created_docs_dashboard(frm);
+        }
 
         // Realtime progress listener (register once per form instance)
         if (!frm._realtime_bound) {
@@ -167,26 +129,35 @@ frappe.ui.form.on("AI Procurement Job", {
 });
 
 // =================================================================
-// Review form rendering
+// Review UI rendering (unified)
 // =================================================================
 
-var _HEADER_FIELDS = [
+var _SUPPLIER_FIELDS = [
     { key: "supplier_name", label: "Supplier Name", type: "text" },
     { key: "supplier_address", label: "Supplier Address", type: "text" },
     { key: "supplier_tax_id", label: "Supplier Tax ID", type: "text" },
     { key: "supplier_email", label: "Supplier Email", type: "text" },
     { key: "supplier_phone", label: "Supplier Phone", type: "text" },
+];
+
+var _DOCUMENT_FIELDS = [
     { key: "document_number", label: "Document Number", type: "text" },
     { key: "document_date", label: "Document Date", type: "date" },
     { key: "order_reference", label: "Order Reference", type: "text" },
     { key: "delivery_date", label: "Delivery Date", type: "date" },
     { key: "payment_terms", label: "Payment Terms", type: "text" },
     { key: "currency", label: "Currency", type: "text" },
+];
+
+var _TOTALS_FIELDS = [
     { key: "subtotal", label: "Subtotal", type: "number" },
     { key: "tax_amount", label: "Tax Amount", type: "number" },
-    { key: "total_amount", label: "Total Amount", type: "number" },
     { key: "shipping_cost", label: "Shipping Cost", type: "number" },
+    { key: "total_amount", label: "Total Amount", type: "number" },
 ];
+
+// All header fields combined (used by _compute_confidence and _collect_review_data)
+var _HEADER_FIELDS = _SUPPLIER_FIELDS.concat(_DOCUMENT_FIELDS).concat(_TOTALS_FIELDS);
 
 var _ITEM_FIELDS = [
     { key: "item_code", label: "Supplier Code" },
@@ -194,71 +165,147 @@ var _ITEM_FIELDS = [
     { key: "description", label: "Description" },
 ];
 
-// Extra columns after _ITEM_FIELDS: Quantity (compact), Map to Item = 2
-var _EXTRA_COLS = 2;
+var _REVIEW_CSS = '<style>' +
+    '.review-input {' +
+    '  border: none; border-bottom: 1px solid transparent; background: transparent;' +
+    '  padding: 4px 8px; width: 100%; font-size: inherit; color: var(--text-color);' +
+    '  transition: all 0.15s ease;' +
+    '}' +
+    '.review-input:hover { border-bottom-color: var(--gray-300); }' +
+    '.review-input:focus { border-bottom-color: var(--primary); background: var(--subtle-fg); outline: none; }' +
+    '.review-input[type="number"] { text-align: right; }' +
+    '.confidence-full    { border-left: 3px solid #38a169; padding-left: 8px; }' +
+    '.confidence-partial { border-left: 3px solid #d69e2e; padding-left: 8px; }' +
+    '.confidence-low     { border-left: 3px solid #a0aec0; padding-left: 8px; }' +
+    '.review-card {' +
+    '  border: 1px solid var(--border-color); border-radius: 8px;' +
+    '  padding: 16px; margin-bottom: 16px; background: var(--card-bg);' +
+    '}' +
+    '.review-card h6 {' +
+    '  margin: 0 0 12px; font-size: 0.8em; text-transform: uppercase;' +
+    '  letter-spacing: 0.05em; color: var(--text-muted);' +
+    '}' +
+    '.review-totals { text-align: right; padding: 12px 16px; }' +
+    '.review-totals .total-row { display: flex; justify-content: flex-end; gap: 16px; align-items: center; margin-bottom: 4px; }' +
+    '.review-totals .total-row label { min-width: 100px; text-align: right; color: var(--text-muted); font-size: 0.9em; }' +
+    '.review-totals .total-row .total-input { width: 150px; }' +
+    '.review-totals .total-separator { border-top: 1px solid var(--border-color); margin: 8px 0; }' +
+    '.comparison-panel {' +
+    '  border: 1px solid var(--border-color); border-radius: 8px; padding: 16px;' +
+    '  margin-top: 16px; background: var(--subtle-fg);' +
+    '}' +
+    '.comparison-panel h6 { margin: 0 0 12px; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }' +
+    '.items-table { width: 100%; border-collapse: collapse; }' +
+    '.items-table th { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); padding: 6px 8px; border-bottom: 2px solid var(--border-color); }' +
+    '.items-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color); vertical-align: top; }' +
+    '.items-table .review-input { padding: 2px 4px; }' +
+    '.stock-detail { display: none; margin-top: 4px; padding: 6px 8px; background: var(--subtle-fg); border-radius: 4px; }' +
+    '.stock-detail.open { display: flex; align-items: center; gap: 4px; }' +
+    '.stock-toggle { cursor: pointer; color: var(--text-muted); font-size: 0.8em; user-select: none; }' +
+    '.stock-toggle:hover { color: var(--text-color); }' +
+    '</style>';
 
-function _render_review_form(frm) {
+function _add_reject_button(frm) {
+    frm.add_custom_button(
+        __("Reject"),
+        function () {
+            frappe.prompt(
+                {
+                    fieldname: "reason",
+                    fieldtype: "Small Text",
+                    label: "Rejection Reason",
+                    reqd: 1,
+                },
+                function (values) {
+                    frm.set_value("status", "Error");
+                    frm.set_value("human_review_notes", "Rejected: " + values.reason);
+                    frm.save();
+                },
+                __("Reject Job"),
+                __("Reject")
+            );
+        }
+    );
+}
+
+function _render_field_input(f, val, confidence_map) {
+    var escaped = frappe.utils.escape_html(String(val === null || val === undefined ? "" : val));
+    var input_type = f.type === "number" ? "number" : f.type === "date" ? "date" : "text";
+    var step_attr = f.type === "number" ? ' step="any"' : "";
+    var conf_class = _confidence_class(confidence_map[f.key]);
+    return '<div class="' + conf_class + '" style="margin-bottom:8px;">' +
+        '<label style="font-size:0.8em;color:var(--text-muted);margin-bottom:2px;display:block;">' +
+        __(f.label) + '</label>' +
+        '<input type="' + input_type + '" class="review-input review-field"' +
+        ' data-field="' + f.key + '" value="' + escaped + '"' + step_attr + ' />' +
+        '</div>';
+}
+
+function _render_review_ui(frm, options) {
     var consensus = {};
     try {
-        consensus = JSON.parse(frm.doc.consensus_data || "{}");
+        consensus = JSON.parse(frm.doc.reviewed_data || frm.doc.consensus_data || "{}");
     } catch (e) {
         consensus = {};
     }
 
     var confidence_map = _compute_confidence(frm);
+    var html = _REVIEW_CSS;
+    html += '<div class="review-ui" style="padding:10px;">';
 
-    var html = '<div class="review-form" style="padding:10px;">';
-
-    // Supplier match indicator
-    html +=
-        '<div class="supplier-match-info" style="margin-bottom:14px;padding:10px;' +
-        'border-radius:6px;background:var(--subtle-fg);">' +
-        '<strong>' + __("Supplier") + ':</strong> ' +
-        '<span class="supplier-match-badge">' +
-        '<span class="text-muted">' + __("Checking...") + '</span></span>' +
-        '</div>';
-
-    // Header fields
-    html += '<h5 style="margin-bottom:12px;">' + __("Document Fields") + "</h5>";
-    html += '<table class="table table-bordered table-sm">';
-    html += "<thead><tr><th>" + __("Field") + "</th><th>" + __("Value") + "</th>";
-    html += "<th style='width:80px;'>" + __("Agreement") + "</th></tr></thead><tbody>";
-
-    _HEADER_FIELDS.forEach(function (f) {
-        var val = consensus[f.key];
-        if (val === null || val === undefined) val = "";
-        var input_type = f.type === "number" ? "number" : f.type === "date" ? "date" : "text";
-        var step_attr = f.type === "number" ? ' step="any"' : "";
-        var badge = _confidence_badge(confidence_map[f.key]);
-
-        html += "<tr>";
-        html += "<td><strong>" + __(f.label) + "</strong></td>";
+    // Escalation banner
+    if (options.escalation_reason) {
         html +=
-            '<td><input type="' + input_type + '" class="form-control input-sm review-field"' +
-            ' data-field="' + f.key + '" value="' + frappe.utils.escape_html(String(val)) + '"' +
-            step_attr + " /></td>";
-        html += "<td>" + badge + "</td>";
-        html += "</tr>";
-    });
-    html += "</tbody></table>";
+            '<div style="margin-bottom:16px;padding:12px 16px;border-radius:6px;' +
+            'background:#fff3cd;border:1px solid #ffc107;">' +
+            '<strong style="color:#856404;">' + __("Review Required") + '</strong>' +
+            '<pre style="margin:8px 0 0;white-space:pre-wrap;color:#856404;font-size:0.9em;">' +
+            frappe.utils.escape_html(options.escalation_reason) + '</pre></div>';
+    }
 
-    // Items table
+    // Two-column card layout: Supplier + Document Info
+    html += '<div class="row">';
+
+    // Supplier card
+    html += '<div class="col-md-6">';
+    html += '<div class="review-card">';
+    html += '<h6>' + __("Supplier") + '</h6>';
+    html += '<div class="supplier-match-badge" style="margin-bottom:10px;">' +
+        '<span class="text-muted" style="font-size:0.85em;">' + __("Checking...") + '</span></div>';
+    _SUPPLIER_FIELDS.forEach(function (f) {
+        html += _render_field_input(f, consensus[f.key], confidence_map);
+    });
+    html += '</div></div>';
+
+    // Document info card
+    html += '<div class="col-md-6">';
+    html += '<div class="review-card">';
+    html += '<h6>' + __("Document Info") + '</h6>';
+    _DOCUMENT_FIELDS.forEach(function (f) {
+        html += _render_field_input(f, consensus[f.key], confidence_map);
+    });
+    html += '</div></div>';
+
+    html += '</div>'; // end row
+
+    // Line Items
     var items = consensus.items || [];
-    html +=
-        '<h5 style="margin-top:20px;margin-bottom:12px;">' +
-        __("Line Items") +
-        "</h5>";
+    html += '<div class="review-card">';
+    html += '<h6>' + __("Line Items") + '</h6>';
 
     if (items.length > 0) {
         html += '<div style="overflow-x:auto;">';
-        html += '<table class="table table-bordered table-sm">';
-        html += "<thead><tr><th>#</th>";
+        html += '<table class="items-table">';
+        html += '<thead><tr>';
+        html += '<th>#</th>';
         _ITEM_FIELDS.forEach(function (f) {
-            html += "<th>" + __(f.label) + "</th>";
+            html += '<th>' + __(f.label) + '</th>';
         });
-        html +=
-            "<th>" + __("Quantity") + "</th>" +
-            "<th>" + __("Map to Item") + "</th></tr></thead><tbody>";
+        html += '<th>' + __("Qty") + '</th>';
+        html += '<th>' + __("Rate") + '</th>';
+        html += '<th>' + __("Total") + '</th>';
+        html += '<th>' + __("Map to Item") + '</th>';
+        html += '</tr></thead><tbody>';
 
         items.forEach(function (item, idx) {
             var qty = parseFloat(item["quantity"]) || 0;
@@ -267,68 +314,140 @@ function _render_review_form(frm) {
             var item_uom = item["uom"] || "Nos";
 
             html += '<tr data-item-idx="' + idx + '">';
-            html += "<td>" + (idx + 1) + "</td>";
+            html += '<td>' + (idx + 1) + '</td>';
+
+            // Text fields (code, name, description)
             _ITEM_FIELDS.forEach(function (f) {
                 var val = item[f.key];
                 if (val === null || val === undefined) val = "";
                 html +=
-                    '<td><input type="text"' +
-                    ' class="form-control input-xs review-item-field"' +
+                    '<td><input type="text" class="review-input review-item-field"' +
                     ' data-idx="' + idx + '" data-field="' + f.key + '"' +
                     ' value="' + frappe.utils.escape_html(String(val)) + '" /></td>';
             });
-            // Compact Quantity cell (stacked two-row layout)
+
+            // Qty column with toggle for stock detail
             html +=
                 '<td class="qty-uom-cell" data-idx="' + idx + '"' +
                 ' data-line-total="' + total + '" data-invoice-qty="' + qty + '"' +
                 ' data-invoice-rate="' + rate + '" style="white-space:nowrap;">' +
-                // Row 1: doc-qty × rate = total
                 '<div style="display:flex;align-items:center;gap:4px;">' +
-                '<input type="number" class="form-control input-xs doc-qty" data-idx="' + idx + '"' +
-                ' step="any" style="width:60px;" value="' + qty + '" />' +
-                '<span class="doc-rate-label" data-idx="' + idx + '"' +
-                ' style="font-size:0.85em;color:var(--text-muted);">' +
-                '&times;&thinsp;' + format_currency(rate) +
-                '</span>' +
-                '<span class="line-total" data-idx="' + idx + '"' +
-                ' style="margin-left:auto;font-size:0.85em;">' +
-                '=&thinsp;<strong>' + format_currency(total) + '</strong></span>' +
+                '<input type="number" class="review-input doc-qty" data-idx="' + idx + '"' +
+                ' step="any" style="width:70px;" value="' + qty + '" />' +
+                '<span class="stock-toggle" data-idx="' + idx + '" title="' + __("Stock details") + '">&#9660;</span>' +
                 '</div>' +
-                // Row 2: stock-qty / UOM
-                '<div class="stock-row" data-idx="' + idx + '"' +
-                ' style="display:flex;margin-top:3px;align-items:center;gap:4px;">' +
-                '<span style="font-size:0.85em;color:var(--text-muted);">&darr;</span>' +
-                '<input type="number" class="form-control input-xs stock-qty" data-idx="' + idx + '"' +
+                // Collapsible stock detail row
+                '<div class="stock-detail" data-idx="' + idx + '">' +
+                '<span style="font-size:0.85em;color:var(--text-muted);">' + __("Stock") + ':&nbsp;</span>' +
+                '<input type="number" class="review-input stock-qty" data-idx="' + idx + '"' +
                 ' step="any" style="width:60px;" value="' + qty + '" />' +
                 '<div class="stock-uom-control" data-idx="' + idx + '"' +
                 ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"' +
-                ' style="display:inline-block;width:70px;"></div>' +
+                ' style="display:inline-block;width:80px;"></div>' +
                 '<span class="qty-info" data-idx="' + idx + '"' +
                 ' style="font-size:0.8em;color:var(--text-muted);"></span>' +
                 '</div>' +
-                // Warning line
                 '<div class="qty-warning" data-idx="' + idx + '"' +
                 ' style="display:none;font-size:0.8em;color:#c53030;margin-top:2px;"></div>' +
                 '</td>';
-            // Map to Item (badge + Link control in one cell)
+
+            // Rate (auto-calculated, read-only styled)
+            html +=
+                '<td><span class="doc-rate-label" data-idx="' + idx + '"' +
+                ' style="font-size:0.9em;color:var(--text-muted);">' +
+                format_currency(rate) + '</span></td>';
+
+            // Total (bold, from extraction)
+            html +=
+                '<td><span class="line-total" data-idx="' + idx + '"' +
+                ' style="font-weight:600;">' +
+                format_currency(total) + '</span></td>';
+
+            // Map to Item
             html +=
                 '<td>' +
                 '<div class="item-match-cell" data-idx="' + idx + '" style="margin-bottom:4px;">' +
                 '<span class="text-muted" style="font-size:0.8em;">' + __("Checking...") + '</span></div>' +
                 '<div class="item-link-control" data-idx="' + idx + '"></div>' +
                 '</td>';
-            html += "</tr>";
+            html += '</tr>';
         });
-        html += "</tbody></table></div>";
+        html += '</tbody></table></div>';
     } else {
-        html += '<p class="text-muted">' + __("No line items extracted") + "</p>";
+        html += '<p class="text-muted">' + __("No line items extracted") + '</p>';
+    }
+    html += '</div>'; // end items card
+
+    // Totals section (receipt-style, right-aligned)
+    html += '<div class="review-card">';
+    html += '<div class="review-totals">';
+    _TOTALS_FIELDS.forEach(function (f, i) {
+        // Separator before total_amount
+        if (f.key === "total_amount") {
+            html += '<div class="total-separator"></div>';
+        }
+        var val = consensus[f.key];
+        if (val === null || val === undefined) val = "";
+        var conf_class = _confidence_class(confidence_map[f.key]);
+        var is_total = f.key === "total_amount";
+        html += '<div class="total-row ' + conf_class + '">';
+        html += '<label>' + __(f.label) + ':</label>';
+        html += '<input type="number" class="review-input review-field total-input' +
+            (is_total ? '" style="font-weight:700;' : '"') +
+            ' data-field="' + f.key + '" value="' + frappe.utils.escape_html(String(val)) + '"' +
+            ' step="any" />';
+        html += '</div>';
+    });
+    html += '</div></div>';
+
+    // Comparison panel (Needs Review with created docs)
+    if (options.show_comparison) {
+        html += '<div class="comparison-panel">';
+        html += '<h6>' + __("Created Documents") + '</h6>';
+        html += '<div class="comparison-docs">';
+        if (frm.doc.created_supplier) {
+            html += '<div style="margin-bottom:6px;"><a href="/app/supplier/' +
+                encodeURIComponent(frm.doc.created_supplier) + '">' +
+                __("Supplier") + ': ' + frappe.utils.escape_html(frm.doc.created_supplier) + '</a></div>';
+        }
+        if (frm.doc.created_po) {
+            html += '<div class="comparison-doc-row" data-doctype="Purchase Order"' +
+                ' data-name="' + frappe.utils.escape_html(frm.doc.created_po) + '" style="margin-bottom:6px;">' +
+                '<a href="/app/purchase-order/' + encodeURIComponent(frm.doc.created_po) + '">' +
+                __("PO") + ': ' + frappe.utils.escape_html(frm.doc.created_po) + '</a>' +
+                ' <span class="doc-grand-total text-muted"></span></div>';
+        }
+        if (frm.doc.created_receipt) {
+            html += '<div class="comparison-doc-row" data-doctype="Purchase Receipt"' +
+                ' data-name="' + frappe.utils.escape_html(frm.doc.created_receipt) + '" style="margin-bottom:6px;">' +
+                '<a href="/app/purchase-receipt/' + encodeURIComponent(frm.doc.created_receipt) + '">' +
+                __("PR") + ': ' + frappe.utils.escape_html(frm.doc.created_receipt) + '</a>' +
+                ' <span class="doc-grand-total text-muted"></span></div>';
+        }
+        if (frm.doc.created_invoice) {
+            html += '<div class="comparison-doc-row" data-doctype="Purchase Invoice"' +
+                ' data-name="' + frappe.utils.escape_html(frm.doc.created_invoice) + '" style="margin-bottom:6px;">' +
+                '<a href="/app/purchase-invoice/' + encodeURIComponent(frm.doc.created_invoice) + '">' +
+                __("PI") + ': ' + frappe.utils.escape_html(frm.doc.created_invoice) + '</a>' +
+                ' <span class="doc-grand-total text-muted"></span></div>';
+        }
+        html += '<div class="comparison-delta" style="margin-top:8px;font-size:0.9em;"></div>';
+        html += '</div></div>';
     }
 
-    html += "</div>";
+    html += '</div>'; // end review-ui
 
     // Render into review_html wrapper
     var wrapper = frm.fields_dict.review_html.$wrapper;
     wrapper.html(html);
+
+    // Stock detail toggle
+    wrapper.find(".stock-toggle").on("click", function () {
+        var idx = $(this).data("idx");
+        var $detail = wrapper.find('.stock-detail[data-idx="' + idx + '"]');
+        $detail.toggleClass("open");
+        $(this).html($detail.hasClass("open") ? "&#9650;" : "&#9660;");
+    });
 
     // Create Frappe Link controls for "Map to Item"
     wrapper.find(".item-link-control").each(function () {
@@ -343,14 +462,12 @@ function _render_review_form(frm) {
                 change: function () {
                     var item_code = control.get_value();
                     if (item_code) {
-                        // Fetch stock_uom and lock the warehouse UOM field
                         frappe.db.get_value("Item", item_code, "stock_uom", function (r) {
                             if (r && r.stock_uom) {
                                 _set_stock_uom_readonly(wrapper, idx, r.stock_uom);
                             }
                         });
                     } else {
-                        // Cleared — unlock the warehouse UOM field
                         _set_stock_uom_editable(wrapper, idx);
                     }
                 },
@@ -398,6 +515,45 @@ function _render_review_form(frm) {
         var matches = r.message;
         _render_match_badges(wrapper, matches);
     });
+
+    // Async: fetch grand totals for comparison panel
+    if (options.show_comparison) {
+        wrapper.find(".comparison-doc-row").each(function () {
+            var $row = $(this);
+            var doctype = $row.data("doctype");
+            var name = $row.data("name");
+            frappe.db.get_value(doctype, name, "grand_total", function (r) {
+                if (r && r.grand_total !== undefined) {
+                    $row.find(".doc-grand-total").text("(" + __("Grand Total") + ": " + format_currency(r.grand_total) + ")");
+                }
+            });
+        });
+        // Calculate delta after a short delay to let grand_totals load
+        setTimeout(function () {
+            var extracted_total = parseFloat(consensus.total_amount) || 0;
+            var $delta = wrapper.find(".comparison-delta");
+            var doc_totals = [];
+            wrapper.find(".doc-grand-total").each(function () {
+                var text = $(this).text();
+                var match = text.match(/([\d.,]+)/);
+                if (match) doc_totals.push(parseFloat(match[1].replace(",", "")));
+            });
+            if (doc_totals.length > 0 && extracted_total > 0) {
+                var max_doc = Math.max.apply(null, doc_totals);
+                var delta = Math.abs(extracted_total - max_doc);
+                var pct = ((delta / extracted_total) * 100).toFixed(2);
+                if (delta > 0.01) {
+                    $delta.html(
+                        '<span style="color:#c53030;">' +
+                        __("Delta") + ': ' + format_currency(delta) + ' (' + pct + '%)' +
+                        '</span>'
+                    );
+                } else {
+                    $delta.html('<span style="color:#38a169;">' + __("Amounts match") + '</span>');
+                }
+            }
+        }, 1500);
+    }
 }
 
 function _render_match_badges(wrapper, matches) {
@@ -468,92 +624,6 @@ function _render_match_badges(wrapper, matches) {
     });
 }
 
-// =================================================================
-// Needs Review summary (post-creation amount mismatch)
-// =================================================================
-
-function _render_needs_review_summary(frm) {
-    var consensus = {};
-    try {
-        consensus = JSON.parse(frm.doc.reviewed_data || frm.doc.consensus_data || "{}");
-    } catch (e) {
-        consensus = {};
-    }
-
-    var html = '<div class="needs-review-summary" style="padding:10px;">';
-
-    // Reason banner
-    if (frm.doc.escalation_reason) {
-        html +=
-            '<div style="margin-bottom:16px;padding:12px 16px;border-radius:6px;' +
-            'background:#fff3cd;border:1px solid #ffc107;">' +
-            '<strong style="color:#856404;">' + __("Review Required") + '</strong>' +
-            '<pre style="margin:8px 0 0;white-space:pre-wrap;color:#856404;font-size:0.9em;">' +
-            frappe.utils.escape_html(frm.doc.escalation_reason) + '</pre></div>';
-    }
-
-    // Read-only header fields
-    html += '<h5 style="margin-bottom:12px;">' + __("Extracted Data") + '</h5>';
-    html += '<table class="table table-bordered table-sm">';
-    html += '<thead><tr><th>' + __("Field") + '</th><th>' + __("Value") + '</th></tr></thead><tbody>';
-
-    _HEADER_FIELDS.forEach(function (f) {
-        var val = consensus[f.key];
-        if (val === null || val === undefined || val === "") return;
-        var display_val = frappe.utils.escape_html(String(val));
-        if (f.type === "number" && val) {
-            display_val = format_currency(parseFloat(val));
-        }
-        html += '<tr><td><strong>' + __(f.label) + '</strong></td>';
-        html += '<td>' + display_val + '</td></tr>';
-    });
-    html += '</tbody></table>';
-
-    // Read-only items table
-    var items = consensus.items || [];
-    if (items.length > 0) {
-        html += '<h5 style="margin-top:16px;margin-bottom:12px;">' + __("Line Items") + '</h5>';
-        html += '<div style="overflow-x:auto;">';
-        html += '<table class="table table-bordered table-sm">';
-        html += '<thead><tr><th>#</th>';
-        _ITEM_FIELDS.forEach(function (f) {
-            html += '<th>' + __(f.label) + '</th>';
-        });
-        html += '<th>' + __("Qty") + '</th>';
-        html += '<th>' + __("Rate") + '</th>';
-        html += '<th>' + __("UOM") + '</th>';
-        html += '<th>' + __("Total") + '</th>';
-        html += '</tr></thead><tbody>';
-
-        items.forEach(function (item, idx) {
-            var qty = parseFloat(item["quantity"]) || 0;
-            var rate = parseFloat(item["unit_price"]) || 0;
-            var total = parseFloat(item["total_price"]) || (qty * rate);
-            html += '<tr>';
-            html += '<td>' + (idx + 1) + '</td>';
-            _ITEM_FIELDS.forEach(function (f) {
-                var val = item[f.key];
-                if (val === null || val === undefined) val = "";
-                html += '<td>' + frappe.utils.escape_html(String(val)) + '</td>';
-            });
-            html += '<td>' + qty + '</td>';
-            html += '<td>' + format_currency(rate) + '</td>';
-            html += '<td>' + frappe.utils.escape_html(String(item["uom"] || "")) + '</td>';
-            html += '<td>' + format_currency(total) + '</td>';
-            html += '</tr>';
-        });
-        html += '</tbody></table></div>';
-    }
-
-    html += '</div>';
-
-    // Render into review_html wrapper
-    var wrapper = frm.fields_dict.review_html;
-    if (wrapper && wrapper.$wrapper) {
-        wrapper.$wrapper.html(html);
-    }
-}
-
 function _compute_confidence(frm) {
     // Parse each extraction result and compute per-field agreement
     var results = (frm.doc.extraction_results || []).map(function (row) {
@@ -596,20 +666,17 @@ function _compute_confidence(frm) {
     return confidence_map;
 }
 
-function _confidence_badge(info) {
+function _confidence_class(info) {
     if (!info || info.total === 0) {
-        return '<span class="text-muted">-</span>';
+        return "confidence-low";
     }
     if (info.agree === info.total) {
-        return (
-            '<span class="badge badge-success" style="background:#38a169;color:#fff;">' +
-            info.agree + "/" + info.total + "</span>"
-        );
+        return "confidence-full";
     }
-    return (
-        '<span class="badge badge-warning" style="background:#d69e2e;color:#fff;">' +
-        info.agree + "/" + info.total + "</span>"
-    );
+    if (info.agree > 1) {
+        return "confidence-partial";
+    }
+    return "confidence-low";
 }
 
 function _collect_review_data(frm) {
@@ -802,50 +869,27 @@ function _render_status_badge(frm) {
     );
 }
 
-function _render_created_docs(frm) {
-    if (frm.doc.status !== "Completed" && frm.doc.status !== "Needs Review") return;
-
+function _render_created_docs_dashboard(frm) {
     var html = '<div class="created-docs-summary">';
     if (frm.doc.created_supplier) {
-        html +=
-            '<a href="/app/supplier/' +
-            frm.doc.created_supplier +
-            '">Supplier: ' +
-            frm.doc.created_supplier +
-            "</a><br>";
+        html += '<a href="/app/supplier/' + encodeURIComponent(frm.doc.created_supplier) +
+            '">' + __("Supplier") + ': ' + frappe.utils.escape_html(frm.doc.created_supplier) + '</a><br>';
     }
     if (frm.doc.created_po) {
-        html +=
-            '<a href="/app/purchase-order/' +
-            frm.doc.created_po +
-            '">PO: ' +
-            frm.doc.created_po +
-            "</a><br>";
+        html += '<a href="/app/purchase-order/' + encodeURIComponent(frm.doc.created_po) +
+            '">' + __("PO") + ': ' + frappe.utils.escape_html(frm.doc.created_po) + '</a><br>';
     }
     if (frm.doc.created_receipt) {
-        html +=
-            '<a href="/app/purchase-receipt/' +
-            frm.doc.created_receipt +
-            '">Receipt: ' +
-            frm.doc.created_receipt +
-            "</a><br>";
+        html += '<a href="/app/purchase-receipt/' + encodeURIComponent(frm.doc.created_receipt) +
+            '">' + __("PR") + ': ' + frappe.utils.escape_html(frm.doc.created_receipt) + '</a><br>';
     }
     if (frm.doc.created_invoice) {
-        html +=
-            '<a href="/app/purchase-invoice/' +
-            frm.doc.created_invoice +
-            '">Invoice: ' +
-            frm.doc.created_invoice +
-            "</a><br>";
+        html += '<a href="/app/purchase-invoice/' + encodeURIComponent(frm.doc.created_invoice) +
+            '">' + __("PI") + ': ' + frappe.utils.escape_html(frm.doc.created_invoice) + '</a><br>';
     }
-    html += "</div>";
+    html += '</div>';
 
-    if (
-        frm.doc.created_supplier ||
-        frm.doc.created_po ||
-        frm.doc.created_receipt ||
-        frm.doc.created_invoice
-    ) {
+    if (frm.doc.created_supplier || frm.doc.created_po || frm.doc.created_receipt || frm.doc.created_invoice) {
         frm.dashboard.add_section(html, __("Created Documents"));
     }
 }
