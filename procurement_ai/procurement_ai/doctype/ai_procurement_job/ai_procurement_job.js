@@ -1,4 +1,14 @@
 frappe.ui.form.on("AI Procurement Job", {
+    setup: function (frm) {
+        // Default company from AI Procurement Settings
+        if (frm.is_new() && !frm.doc.company) {
+            frappe.db.get_single_value("AI Procurement Settings", "default_company").then(function (value) {
+                if (value) {
+                    frm.set_value("company", value);
+                }
+            });
+        }
+    },
     refresh: function (frm) {
         // Process button for Pending/Error jobs
         if (frm.doc.status === "Pending" || frm.doc.status === "Error") {

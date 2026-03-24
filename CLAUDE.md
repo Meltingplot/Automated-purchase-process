@@ -77,7 +77,7 @@ When `require_document_review` is disabled, the pipeline auto-creates documents 
 
 ### DocTypes
 
-- **AI Procurement Job** (`AIPROC-####`): Central job record. Tracks status (Pending/Processing/Awaiting Review/Needs Review/Completed/Error), stores OCR text, extraction results (child table), consensus data, confidence score, reviewed_data (user-corrected JSON), item_mapping (user-selected Item codes), and links to created Supplier/PO/PR/PI. Deletion clears `ai_procurement_job` back-references on linked PO/PR/PI via `on_trash`.
+- **AI Procurement Job** (`AIPROC-####`): Central job record. Tracks status (Pending/Processing/Awaiting Review/Needs Review/Completed/Error), has a `company` field (Link to Company, required) that defaults to `AI Procurement Settings.default_company` but can be changed per job, stores OCR text, extraction results (child table), consensus data, confidence score, reviewed_data (user-corrected JSON), item_mapping (user-selected Item codes), and links to created Supplier/PO/PR/PI. All chain builders use the job's company for warehouse/account lookups. Deletion clears `ai_procurement_job` back-references on linked PO/PR/PI via `on_trash`.
 - **AI Extraction Result**: Child table of Job. One row per LLM provider with extracted_data JSON, confidence, timing, token count, deviation fields.
 - **AI Procurement Settings** (Single): All configuration -- API keys (Password fields), LLM provider settings, OCR engine choice, confidence threshold, auto-submit toggle, escalation email, local LLM config (provider/URL/model/trust level).
 - **AI Escalation Log** (`ESC-####`): Created when consensus fails. Types: Low Confidence, Field Dispute, Amount Mismatch, Supplier Unclear, OCR Mismatch, Processing Error.
