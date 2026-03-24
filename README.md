@@ -2,7 +2,7 @@
 
 A Frappe v15 custom app that automates the purchase process end-to-end. Upload any procurement document — a shopping cart, order confirmation, delivery note, or invoice — and the plugin extracts structured data using multiple LLMs, builds consensus across their outputs, and creates the complete ERPNext document chain (Supplier, Purchase Order, Purchase Receipt, Purchase Invoice) automatically.
 
-**Publisher:** [Meltingplot GmbH](https://meltingplot.net) | **License:** MIT | **Python:** >=3.11
+**Author:** Tim Schneider | **License:** MIT | **Python:** >=3.11
 
 ---
 
@@ -40,21 +40,22 @@ This plugin eliminates steps 2-4. Upload the document, review the AI extraction 
 ## How It Works
 
 ```
-  ┌──────────────────────────────────────────────────────────────┐
-  │  1. Upload          PDF, image, or email attachment          │
-  │  2. Extract         OCR via pdfplumber + Tesseract/EasyOCR   │
-  │  3. Sanitize        Strip invisible chars, detect injection  │
-  │  4. Classify        LLM determines document type             │
-  │  5. Extract (LLM)   Parallel extraction by 2-3 LLM providers │
-  │  6. Validate        JSON schema + arithmetic plausibility    │
-  │  7. Consensus       Field-by-field majority voting           │
-  │  8. Review (opt.)   Human review UI with per-field confidence │
-  │  9. Build Chain     Supplier → PO → PR → PI as needed       │
-  │ 10. Attach          Source file linked to all created docs   │
-  └──────────────────────────────────────────────────────────────┘
+  ┌───────────────────────────────────────────────────────────────────┐
+  │  1. Upload          PDF, image, or email attachment               │
+  │  2. Extract Text    pdfplumber pulls text + page images from PDF  │
+  │  3. Sanitize        Strip invisible chars, detect injection       │
+  │  4. OCR Baseline    Tesseract/EasyOCR runs on page images         │
+  │  5. Extract (LLM)   Text sent to 2-3 LLM providers in parallel   │
+  │  6. Validate        JSON schema + arithmetic plausibility         │
+  │  7. Consensus       Field-by-field majority voting + OCR cross-   │
+  │                     check against the independent OCR baseline    │
+  │  8. Review (opt.)   Human review UI with per-field confidence     │
+  │  9. Build Chain     Supplier → PO → PR → PI as needed            │
+  │ 10. Attach          Source file linked to all created docs        │
+  └───────────────────────────────────────────────────────────────────┘
 ```
 
-Multiple LLMs extract data independently, then a consensus engine votes field-by-field to produce the most accurate result. No single LLM hallucination can corrupt your data.
+The extracted text is sent to multiple LLMs independently. A consensus engine then votes field-by-field across all LLM outputs and cross-checks the results against a conventional OCR baseline. This means no single LLM hallucination can corrupt your data, and OCR serves as an independent verification layer.
 
 ---
 
@@ -451,4 +452,4 @@ Code style: formatted with **black**, imports sorted with **isort** (black profi
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-Copyright (c) 2026 Tim Schneider / Meltingplot GmbH
+Copyright (c) 2026 Tim Schneider
