@@ -42,22 +42,36 @@ This plugin eliminates steps 2-4. Upload the document, review the AI extraction 
 ```
   ┌───────────────────────────────────────────────────────────────────┐
   │  1. Upload          PDF, image, or email attachment               │
-  │  2. Extract         pdfplumber pulls text + page images from PDF  │
-  │  3. Sanitize        Strip invisible chars, detect injection       │
-  │  4. OCR Baseline    Tesseract/EasyOCR runs on page images as an  │
-  │                     independent cross-check (not primary source)  │
-  │  5. Extract (LLM)   Page images + text sent to 2-3 LLM providers │
-  │                     in parallel — LLMs read the document directly │
-  │  6. Validate        JSON schema + arithmetic plausibility         │
-  │  7. Consensus       Field-by-field majority voting + OCR cross-   │
+  │  2. Extract         pdfplumber extracts text + page images        │
+  │  3. Detect          Native text? (e-invoice / digital PDF)        │
+  │                     or scanned / image-based?                     │
+  │  4. Sanitize        Strip invisible chars, detect injection       │
+  │  5. OCR Baseline    Tesseract/EasyOCR on page images (cross-     │
+  │                     check only — never the primary source)        │
+  │  6. Extract (LLM)   2-3 LLM providers extract data in parallel:  │
+  │                       Native text → text as primary source        │
+  │                       Scanned/image → original images via vision  │
+  │  7. Validate        JSON schema + arithmetic plausibility         │
+  │  8. Consensus       Field-by-field majority voting + OCR cross-   │
   │                     check against the independent OCR baseline    │
-  │  8. Review (opt.)   Human review UI with per-field confidence     │
-  │  9. Build Chain     Supplier → PO → PR → PI as needed            │
-  │ 10. Attach          Source file linked to all created docs        │
+  │  9. Review (opt.)   Human review UI with per-field confidence     │
+  │ 10. Build Chain     Supplier → PO → PR → PI as needed            │
+  │ 11. Attach          Source file linked to all created docs        │
   └───────────────────────────────────────────────────────────────────┘
 ```
 
-Cloud LLMs (Claude, GPT-4o, Gemini) receive the actual document images via their vision capabilities, so they read the document directly — just like a human would. The extracted text from pdfplumber is included as supplementary context. A separate OCR pass (Tesseract/EasyOCR) runs independently as a cross-check baseline for the consensus engine.
+### Extraction Strategy
+
+The plugin detects whether a PDF contains native text (e-invoices, digitally generated documents) or is a scanned/image-based document, and chooses the optimal extraction strategy:
+
+| Document Type | Detection | Primary Source | Supplementary |
+|---|---|---|---|
+| **Native text PDF** (e-invoices, digital docs) | ≥50% of pages have rich extracted text | Structured text from pdfplumber | OCR cross-check |
+| **Scanned PDF** | Sparse native text, OCR fallback needed | Original page images via LLM vision | OCR text as context |
+| **Image** (JPG/PNG/TIFF) | Always image-based | Original image via LLM vision | OCR text as context |
+| **Local LLMs** | N/A | Always text (vision support varies) | — |
+
+For native text PDFs, the extracted text is already accurate — sending images would waste tokens and add latency. For scanned documents and photos, OCR introduces errors, so cloud LLMs (Claude, GPT-4o, Gemini) receive the original page images via their vision capabilities and read the document directly — just like a human would. A separate OCR pass still runs independently as a cross-check baseline for the consensus engine.
 
 Multiple LLMs extract data independently, then a consensus engine votes field-by-field to produce the most accurate result. No single LLM hallucination can corrupt your data.
 
@@ -83,7 +97,7 @@ The plugin always works **retrospectively** — it builds the full chain regardl
 - Frappe v15 + ERPNext v15
 - Python >= 3.11
 - At least one LLM API key (Claude, OpenAI, or Gemini)
-- Optional: Tesseract or EasyOCR for scanned document support
+- Optional: Tesseract or EasyOCR (used as independent cross-check baseline, not for primary extraction)
 
 ### Install on your Frappe bench
 
@@ -152,7 +166,7 @@ Local LLM Trust Level:  full            (full for 70B+, reduced for 13-70B)
 | `confidence_threshold`     | 0.7     | Minimum confidence to accept extraction               |
 | `min_llm_consensus`        | 2       | Minimum LLM providers that must agree                 |
 | `auto_submit_documents`    | Off     | Submit (finalize) created documents automatically     |
-| `ocr_engine`               | Tesseract | OCR engine for scanned documents                    |
+| `ocr_engine`               | Tesseract | OCR engine for cross-check baseline                 |
 | `amount_tolerance`         | 0.05    | Tolerance for amount verification (5%)                |
 
 ---
@@ -323,17 +337,17 @@ procurement_ai/
 │   ├── purchase_invoice.py # PI builder (linked to PO + PR)
 │   └── attachments.py      # Attach source PDF to created documents
 │
-├── extraction/             # Text extraction from uploaded files
-│   ├── pdf_parser.py       # pdfplumber for native PDFs
-│   ├── ocr_engine.py       # Tesseract / EasyOCR for scanned docs
-│   ├── preprocessor.py     # Image preprocessing for better OCR
+├── extraction/             # Text + image extraction from uploaded files
+│   ├── pdf_parser.py       # pdfplumber text + page images, native text detection
+│   ├── ocr_engine.py       # Tesseract / EasyOCR (cross-check baseline)
+│   ├── preprocessor.py     # Image preprocessing for OCR
 │   └── email_parser.py     # Email attachment handling
 │
 ├── llm/                    # Multi-LLM extraction pipeline
 │   ├── graph.py            # LangGraph StateGraph (8-node pipeline)
-│   ├── nodes.py            # Individual pipeline nodes
+│   ├── nodes.py            # Pipeline nodes (text-primary or vision-primary)
 │   ├── models.py           # LLM provider factory (Claude/OpenAI/Gemini/Local)
-│   ├── prompts.py          # Extraction prompts (NET amounts, structured output)
+│   ├── prompts.py          # Text + vision extraction prompts
 │   ├── sanitizer.py        # InputSanitizer: injection detection, NFKC normalization
 │   ├── output_guard.py     # OutputGuard: JSON validation, plausibility checks
 │   ├── consensus.py        # ConsensusEngine: field-by-field majority voting
@@ -404,8 +418,9 @@ The plugin implements multiple security layers to prevent prompt injection and d
 2. **Prompt Isolation** — Document content is wrapped in `--- BEGIN/END DOCUMENT DATA ---` delimiters, never placed in the instruction portion of prompts
 3. **OutputGuard** — Validates LLM responses against Pydantic schemas, runs arithmetic plausibility checks (do the line items actually add up?)
 4. **Multi-LLM Consensus** — Even if one LLM is manipulated, majority voting across 2-3 independent providers catches inconsistencies
-5. **Local LLM Trust Levels** — Smaller local models get reduced voting weight (`full` for 70B+, `reduced` for 13-70B, `validation_only` for smaller)
-6. **File Upload Validation** — MIME type checking, file size limits, and extension allowlisting
+5. **OCR Cross-Check** — An independent OCR pass runs separately from LLM extraction and is used by the consensus engine to verify results, regardless of whether text or vision was the primary source
+6. **Local LLM Trust Levels** — Smaller local models get reduced voting weight (`full` for 70B+, `reduced` for 13-70B, `validation_only` for smaller)
+7. **File Upload Validation** — MIME type checking, file size limits, and extension allowlisting
 
 ---
 
