@@ -125,9 +125,15 @@ def llm_extraction_node_factory(provider: str) -> Callable:
         is_local = provider == "local"
         type_hint = state.get("source_type_hint", "Auto-Detect")
         images = state.get("document_images", [])
+        is_native_text = state.get("is_native_text", False)
 
-        # Use vision for cloud providers when images are available
-        use_vision = images and not is_local
+        # Decide extraction strategy:
+        # - Native text PDFs (e-invoices, digital docs): text is reliable,
+        #   use it as primary source — no need for expensive vision calls
+        # - Scanned PDFs / images: OCR text is error-prone,
+        #   send original images to LLMs via vision for accurate extraction
+        # - Local LLMs: always text-only (vision support varies)
+        use_vision = images and not is_local and not is_native_text
 
         if use_vision:
             messages = build_vision_extraction_messages(
@@ -145,7 +151,12 @@ def llm_extraction_node_factory(provider: str) -> Callable:
         if use_vision:
             logger.info(
                 f"Job {job_name}: {provider} using vision with "
-                f"{min(len(images), 5)} page image(s)"
+                f"{min(len(images), 5)} page image(s) (scanned/image document)"
+            )
+        elif images and not is_local:
+            logger.info(
+                f"Job {job_name}: {provider} using text-primary mode "
+                f"(native text PDF detected)"
             )
 
         start_time = time.time()

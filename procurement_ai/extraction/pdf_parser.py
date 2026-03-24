@@ -29,6 +29,7 @@ class PDFExtractionResult:
     images: list[bytes] = field(default_factory=list)
     page_count: int = 0
     used_ocr: bool = False
+    is_native_text: bool = False
 
 
 class PDFParser:
@@ -64,6 +65,7 @@ class PDFParser:
         all_text_parts: list[str] = []
         all_images: list[bytes] = []
         used_ocr = False
+        native_text_pages = 0
         page_count = 0
 
         with pdfplumber.open(file_path) as pdf:
@@ -73,7 +75,9 @@ class PDFParser:
                 # Try native text extraction first
                 page_text = page.extract_text() or ""
 
-                if len(page_text.strip()) < MIN_TEXT_CHARS_PER_PAGE:
+                if len(page_text.strip()) >= MIN_TEXT_CHARS_PER_PAGE:
+                    native_text_pages += 1
+                else:
                     # Sparse text: this is likely a scanned page
                     logger.info(
                         f"Page {page_num + 1}: sparse text ({len(page_text)} chars), "
@@ -91,11 +95,16 @@ class PDFParser:
                 if page_image:
                     all_images.append(page_image)
 
+        # A PDF is "native text" if majority of pages have good text extraction
+        # (e-invoices, digital PDFs). Scanned documents will have mostly sparse pages.
+        is_native = page_count > 0 and native_text_pages >= (page_count / 2)
+
         return PDFExtractionResult(
             text="\n\n".join(all_text_parts),
             images=all_images,
             page_count=page_count,
             used_ocr=used_ocr,
+            is_native_text=is_native,
         )
 
     def extract_from_bytes(self, pdf_bytes: bytes) -> PDFExtractionResult:
