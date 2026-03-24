@@ -154,7 +154,7 @@ All chain builders dynamically query defaults instead of hardcoding names:
 | Item Group | `Stock Settings.item_group` | First non-group Item Group |
 | Warehouse | `Company.default_warehouse` | First non-group Warehouse (filtered by company) |
 | Expense Account | `Company.default_expense_account` | First non-group Expense account (filtered by company) |
-| Tax Account | Default Purchase Taxes and Charges Template | First Tax-type account (filtered by company) |
+| Tax Account | Default Purchase Taxes and Charges Template (rate-matched row) | Any company template (rate-matched row); None if no match (skips row) |
 
 All throw clear errors if no fallback exists.
 
