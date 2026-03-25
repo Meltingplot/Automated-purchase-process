@@ -141,12 +141,17 @@ def _build_items(
 
     for idx, item in enumerate(extracted_data.get("items", [])):
         mapped_code = item_mapping.get(idx) if item_mapping else None
+        # A key present with None value means user explicitly cleared the mapping
+        # → force creation of a new item (skip fuzzy matching).
+        user_cleared = item_mapping is not None and idx in item_mapping and item_mapping[idx] is None
         stock_uom = stock_uom_mapping.get(idx) if stock_uom_mapping else None
         if mapped_code:
             item_code = mapped_code
             # User-mapped item — ensure supplier link exists on the item
             extracted_code = _sanitize_code(item.get("item_code", ""))
             _ensure_supplier_link(item_code, supplier, extracted_code)
+        elif user_cleared:
+            item_code = _create_item(item, supplier, settings, stock_uom=stock_uom)
         else:
             item_code = _resolve_item(item, settings, supplier, stock_uom=stock_uom)
         qty = float(item.get("quantity", 1) or 1)
