@@ -8,11 +8,13 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 
 # Provide a fake frappe module so the import works without a Frappe instance.
-frappe_mock = MagicMock()
-frappe_mock.utils.flt = lambda x, *a, **kw: float(x or 0)
-frappe_mock.utils.today = lambda: "2026-03-23"
-frappe_mock.utils.round_based_on_smallest_currency_fraction = lambda x, *a, **kw: x
-sys.modules.setdefault("frappe", frappe_mock)
+# Use setdefault and capture the actual module-level object (may already exist
+# from another test file that was imported first).
+_new_mock = MagicMock()
+_new_mock.utils.flt = lambda x, *a, **kw: float(x or 0)
+_new_mock.utils.today = lambda: "2026-03-23"
+_new_mock.utils.round_based_on_smallest_currency_fraction = lambda x, *a, **kw: x
+frappe_mock = sys.modules.setdefault("frappe", _new_mock)
 sys.modules.setdefault("frappe.utils", frappe_mock.utils)
 
 from procurement_ai.chain_builder.purchase_order import _ensure_supplier_link
