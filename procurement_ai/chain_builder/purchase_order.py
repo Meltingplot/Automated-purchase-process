@@ -294,6 +294,48 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
     return taxes
 
 
+def _pick_input_tax_account(
+    rows: list[dict], tax_rate: float, rate_tolerance: float
+) -> str | None:
+    """Pick the best tax account from template rows for a purchase document.
+
+    Collects all rows whose ``rate`` matches *tax_rate* (within *rate_tolerance*),
+    then **prefers** accounts with ``root_type='Asset'`` (Vorsteuer / input VAT)
+    over ``root_type='Liability'`` (Umsatzsteuer / output VAT).
+
+    In German accounting (SKR03/SKR04) input-tax accounts live under Assets
+    (e.g. 1576/1406 Vorsteuer) while output-tax accounts live under Liabilities
+    (e.g. 1771/3806 Umsatzsteuer).  For purchase documents we must book to
+    Vorsteuer — booking to Umsatzsteuer is a compliance error.
+    """
+    candidates: list[str] = []
+    for row in rows:
+        try:
+            if abs(float(row["rate"]) - tax_rate) < rate_tolerance:
+                candidates.append(row["account_head"])
+        except (TypeError, ValueError):
+            continue
+
+    if not candidates:
+        return None
+
+    # Prefer Asset (Vorsteuer / input VAT) accounts
+    for account in candidates:
+        root_type = frappe.db.get_value("Account", account, "root_type")
+        if root_type == "Asset":
+            return account
+
+    # Graceful fallback — still return *something* but warn loudly
+    logger.warning(
+        "Tax account %r for rate %.1f%% does not have root_type='Asset' — "
+        "expected a Vorsteuer (input VAT) account for purchase documents. "
+        "Please check your Purchase Taxes and Charges Template.",
+        candidates[0],
+        tax_rate,
+    )
+    return candidates[0]
+
+
 def _get_tax_account(company: str, tax_rate: float) -> str | None:
     """Find the correct tax account for the given *tax_rate* and *company*.
 
@@ -306,11 +348,10 @@ def _get_tax_account(company: str, tax_rate: float) -> str | None:
     Lookup strategy:
 
     1. **Default Purchase Taxes and Charges Template** — look for a row whose
-       ``rate`` matches *tax_rate*.  This is the most reliable source because
-       the user has explicitly configured it.
+       ``rate`` matches *tax_rate*.  Prefer accounts with ``root_type='Asset'``
+       (Vorsteuer) over ``root_type='Liability'`` (Umsatzsteuer).
     2. **Any Purchase Taxes and Charges Template for the company** — same
-       rate-matching logic, in case the default template doesn't cover the
-       requested rate but another template does.
+       rate-matching + root_type preference logic.
     3. **No fallback** — if no rate-matched account is found we return
        ``None`` so the caller can skip the row (and log a warning) rather
        than silently booking to a wrong account.
@@ -321,7 +362,7 @@ def _get_tax_account(company: str, tax_rate: float) -> str | None:
     rate_tolerance = 0.01  # floating-point comparison tolerance
 
     # ------------------------------------------------------------------
-    # 1. Default template — match by rate
+    # 1. Default template — match by rate, prefer Vorsteuer (Asset)
     # ------------------------------------------------------------------
     default_template = frappe.db.get_value(
         "Purchase Taxes and Charges Template",
@@ -334,15 +375,12 @@ def _get_tax_account(company: str, tax_rate: float) -> str | None:
             filters={"parent": default_template},
             fields=["account_head", "rate"],
         )
-        for row in rows:
-            try:
-                if abs(float(row["rate"]) - tax_rate) < rate_tolerance:
-                    return row["account_head"]
-            except (TypeError, ValueError):
-                continue
+        result = _pick_input_tax_account(rows, tax_rate, rate_tolerance)
+        if result:
+            return result
 
     # ------------------------------------------------------------------
-    # 2. Any template for this company — match by rate
+    # 2. Any template for this company — match by rate, prefer Vorsteuer
     # ------------------------------------------------------------------
     all_templates = frappe.get_all(
         "Purchase Taxes and Charges Template",
@@ -357,12 +395,9 @@ def _get_tax_account(company: str, tax_rate: float) -> str | None:
             filters={"parent": tmpl["name"]},
             fields=["account_head", "rate"],
         )
-        for row in rows:
-            try:
-                if abs(float(row["rate"]) - tax_rate) < rate_tolerance:
-                    return row["account_head"]
-            except (TypeError, ValueError):
-                continue
+        result = _pick_input_tax_account(rows, tax_rate, rate_tolerance)
+        if result:
+            return result
 
     logger.warning(
         "No tax account found for rate %.1f%% in company %r — "
