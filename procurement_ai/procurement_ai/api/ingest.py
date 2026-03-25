@@ -399,13 +399,14 @@ def run_chain_from_review(procurement_job_name: str):
             )
 
         # Parse item_mapping (JSON: {"0": "ITEM-001", "1": null, ...})
+        # Preserve null/empty values: a key with None means the user explicitly
+        # cleared the mapping and wants a NEW item created (skip fuzzy matching).
+        # A missing key means the item was never mapped (normal resolve logic).
         item_mapping = None
         if job.item_mapping:
             raw_mapping = json.loads(job.item_mapping)
-            # Convert string keys to int, skip null/empty values
             item_mapping = {
-                int(k): v for k, v in raw_mapping.items()
-                if v
+                int(k): (v if v else None) for k, v in raw_mapping.items()
             }
             if not item_mapping:
                 item_mapping = None
