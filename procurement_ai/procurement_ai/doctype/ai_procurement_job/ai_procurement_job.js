@@ -494,6 +494,24 @@ function _render_review_ui(frm, options) {
         $el.data("control", control);
     });
 
+    // Restore saved item_mapping values (so cleared mappings survive form reload)
+    var saved_mapping = {};
+    try {
+        saved_mapping = JSON.parse(frm.doc.item_mapping || "{}");
+    } catch (e) {
+        saved_mapping = {};
+    }
+    wrapper.find(".item-link-control").each(function () {
+        var $el = $(this);
+        var idx = String($el.data("idx"));
+        if (idx in saved_mapping && saved_mapping[idx]) {
+            var control = $el.data("control");
+            if (control) {
+                control.set_value(saved_mapping[idx]);
+            }
+        }
+    });
+
     // Create Frappe Link controls for Stock UOM fields
     wrapper.find(".stock-uom-control").each(function () {
         var $el = $(this);
@@ -538,7 +556,7 @@ function _render_review_ui(frm, options) {
     frm.call("check_review_matches").then(function (r) {
         if (!r || !r.message) return;
         var matches = r.message;
-        _render_match_badges(wrapper, matches);
+        _render_match_badges(wrapper, matches, frm);
     });
 
     // Async: fetch grand totals for comparison panel
@@ -581,7 +599,15 @@ function _render_review_ui(frm, options) {
     }
 }
 
-function _render_match_badges(wrapper, matches) {
+function _render_match_badges(wrapper, matches, frm) {
+    // Parse saved item_mapping to respect user-cleared mappings
+    var saved_mapping = {};
+    try {
+        saved_mapping = JSON.parse((frm && frm.doc.item_mapping) || "{}");
+    } catch (e) {
+        saved_mapping = {};
+    }
+
     // Supplier badge
     var $supplier = wrapper.find(".supplier-match-badge");
     if (matches.supplier) {
@@ -619,7 +645,27 @@ function _render_match_badges(wrapper, matches) {
         // Pre-fill the Link control and show status badge
         var $link = wrapper.find('.item-link-control[data-idx="' + idx + '"]');
         var link_control = $link.data("control");
-        if (info.exists) {
+        var idx_str = String(idx);
+        var user_cleared = idx_str in saved_mapping && !saved_mapping[idx_str];
+        var user_mapped = idx_str in saved_mapping && !!saved_mapping[idx_str];
+
+        if (user_cleared) {
+            // User explicitly cleared this item — don't re-populate, show "New" badge
+            $cell.html(
+                '<span class="badge" style="background:#3182ce;color:#fff;font-size:0.75em;">' +
+                    __("New") + "</span>"
+            );
+            _set_stock_uom_editable(wrapper, idx);
+        } else if (user_mapped) {
+            // User explicitly selected an item — keep their choice, show "Exists" badge
+            $cell.html(
+                '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                    __("Exists") + "</span>"
+            );
+            if (info.stock_uom) {
+                _set_stock_uom_readonly(wrapper, idx, info.stock_uom);
+            }
+        } else if (info.exists) {
             if (link_control) {
                 link_control.set_value(info.item_code);
             }
