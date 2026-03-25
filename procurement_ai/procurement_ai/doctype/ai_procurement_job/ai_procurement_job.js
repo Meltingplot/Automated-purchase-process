@@ -121,6 +121,20 @@ frappe.ui.form.on("AI Procurement Job", {
         }
     },
 
+    before_save: function (frm) {
+        // Collect review UI data into JSON fields so standard Save persists them
+        if (
+            (frm.doc.status === "Awaiting Review" || frm.doc.status === "Needs Review") &&
+            frm.fields_dict.review_html &&
+            frm.fields_dict.review_html.$wrapper &&
+            frm.fields_dict.review_html.$wrapper.find(".review-field").length
+        ) {
+            var data = _collect_review_data(frm);
+            frm.doc.reviewed_data = JSON.stringify(data.reviewed);
+            frm.doc.item_mapping = JSON.stringify(data.item_mapping);
+            frm.doc.stock_uom_mapping = JSON.stringify(data.stock_uom_mapping);
+        }
+    },
     source_document: function (frm) {
         if (frm.doc.source_document) {
             frm.set_value("source_document_url", frm.doc.source_document);
@@ -460,6 +474,7 @@ function _render_review_ui(frm, options) {
                 options: "Item",
                 placeholder: __("Auto-resolve"),
                 change: function () {
+                    frm.dirty();
                     var item_code = control.get_value();
                     if (item_code) {
                         frappe.db.get_value("Item", item_code, "stock_uom", function (r) {
@@ -490,6 +505,9 @@ function _render_review_ui(frm, options) {
                 fieldname: "stock_uom_" + idx,
                 options: "UOM",
                 placeholder: __("Stock UOM"),
+                change: function () {
+                    frm.dirty();
+                },
             },
             parent: $el,
             render_input: true,
@@ -501,12 +519,19 @@ function _render_review_ui(frm, options) {
 
     // Quantity cell event handlers
     wrapper.find(".doc-qty").on("change", function () {
+        frm.dirty();
         var idx = $(this).data("idx");
         _recalc_qty_cell(wrapper, idx);
     });
     wrapper.find(".stock-qty").on("change", function () {
+        frm.dirty();
         var idx = $(this).data("idx");
         _recalc_qty_cell(wrapper, idx);
+    });
+
+    // Mark form dirty when any review input changes
+    wrapper.find(".review-input").on("change", function () {
+        frm.dirty();
     });
 
     // Async: check which supplier/items already exist
