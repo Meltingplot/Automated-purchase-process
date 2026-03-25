@@ -55,10 +55,10 @@ class AIProcurementJob(Document):
         Accepts review data inline to avoid a separate save round-trip
         (two sequential writes to the same doc cause a deadlock).
         """
-        if self.status != "Awaiting Review":
+        if self.status not in ("Awaiting Review", "Needs Review"):
             frappe.throw(
                 f"Cannot approve job in status '{self.status}'. "
-                "Only jobs in 'Awaiting Review' can be approved."
+                "Only jobs in 'Awaiting Review' or 'Needs Review' can be approved."
             )
 
         # Verify the job owner has permissions to create all document types
@@ -110,10 +110,10 @@ class AIProcurementJob(Document):
         of {idx, item_code, item_name, stock_uom, created} dicts
         so the review UI can update badges and lock controls.
         """
-        if self.status != "Awaiting Review":
+        if self.status not in ("Awaiting Review", "Needs Review"):
             frappe.throw(
                 f"Cannot pre-create items in status '{self.status}'. "
-                "Only jobs in 'Awaiting Review' can pre-create items."
+                "Only jobs in 'Awaiting Review' or 'Needs Review' can pre-create items."
             )
 
         if not frappe.has_permission("Item", ptype="create"):
