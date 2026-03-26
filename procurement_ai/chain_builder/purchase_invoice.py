@@ -198,21 +198,46 @@ def _build_invoice_items(
 
 
 def _get_default_expense_account(company: str) -> str:
-    """Get default expense account for the company."""
-    # Try company default first
+    """Get default expense account for the company.
+
+    Lookup order:
+    1. ``Company.default_expense_account`` (explicit user setting).
+    2. First *Cost of Goods Sold* account — the natural account type for
+       purchased goods (SKR04: Aufwendungen für bezogene Waren 5800-5899,
+       SKR03: Wareneinsatz 3xxx).
+    3. First *Expense Account* type account — general expense, still better
+       than an arbitrary pick.
+    4. Any non-group expense account (last resort).
+    """
+    # 1. Company default
     if company:
         default = frappe.db.get_value("Company", company, "default_expense_account")
         if default:
             return default
 
-    # Fall back to first non-group expense account for the company
-    filters = {"root_type": "Expense", "is_group": 0}
+    base_filters: dict = {"root_type": "Expense", "is_group": 0}
     if company:
-        filters["company"] = company
+        base_filters["company"] = company
 
+    # 2+3. Prefer purchase-appropriate account types.  "Cost of Goods Sold"
+    #       maps to the SKR04 range 5800-5899 which is correct for purchased
+    #       goods.  "Expense Account" is the next-best option — avoids picking
+    #       e.g. "Herstellungskosten" (manufacturing, 5000-5199) by accident.
+    for preferred_type in ("Cost of Goods Sold", "Expense Account"):
+        accounts = frappe.get_all(
+            "Account",
+            filters={**base_filters, "account_type": preferred_type},
+            fields=["name"],
+            limit=1,
+            order_by="creation asc",
+        )
+        if accounts:
+            return accounts[0]["name"]
+
+    # 4. Last resort — any non-group expense account
     accounts = frappe.get_all(
         "Account",
-        filters=filters,
+        filters=base_filters,
         fields=["name"],
         limit=1,
         order_by="creation asc",
