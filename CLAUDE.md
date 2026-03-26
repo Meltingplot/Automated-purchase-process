@@ -153,8 +153,8 @@ All chain builders dynamically query defaults instead of hardcoding names:
 | Supplier Group | `Buying Settings.supplier_group` | First non-group Supplier Group |
 | Item Group | `Stock Settings.item_group` | First non-group Item Group |
 | Warehouse | `Company.default_warehouse` | First non-group Warehouse (filtered by company) |
-| Expense Account | `Company.default_expense_account` | First non-group Expense account (filtered by company) |
-| Tax Account | Default Purchase Taxes and Charges Template (rate-matched row) | Any company template (rate-matched row); None if no match (skips row) |
+| Expense Account | `Company.default_expense_account` | `account_type="Cost of Goods Sold"` → `"Expense Account"` → any non-group Expense account |
+| Tax Account | Default Purchase Taxes and Charges Template (rate-matched row, prefer `root_type="Asset"` / Vorsteuer) | Any company template (rate-matched, Vorsteuer-preferred); None if no match (skips row) |
 
 All throw clear errors if no fallback exists.
 
