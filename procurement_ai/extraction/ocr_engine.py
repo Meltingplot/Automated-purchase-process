@@ -84,7 +84,9 @@ class OCREngine:
             return "\n".join(results).strip()
         except ImportError:
             raise ImportError(
-                "easyocr is not installed. Install with: pip install easyocr"
+                "EasyOCR is an optional dependency. Install with: "
+                "pip install easyocr (note: pulls ~3-4 GB of torch/CUDA). "
+                "Alternatively switch OCR Engine to 'Tesseract' in AI Procurement Settings."
             )
         except Exception as e:
             logger.error(f"EasyOCR failed: {e}")

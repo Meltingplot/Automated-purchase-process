@@ -67,6 +67,7 @@
         },
         {
             "default": "Tesseract",
+            "description": "EasyOCR requires manual install (pip install easyocr) — pulls ~3-4 GB of torch/CUDA dependencies.",
             "fieldname": "ocr_engine",
             "fieldtype": "Select",
             "label": "OCR Engine",
