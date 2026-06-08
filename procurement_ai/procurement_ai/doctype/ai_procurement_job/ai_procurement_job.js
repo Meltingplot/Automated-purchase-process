@@ -365,11 +365,10 @@ function _render_review_ui(frm, options) {
                 ' style="display:none;font-size:0.8em;color:#c53030;margin-top:2px;"></div>' +
                 '</td>';
 
-            // Rate (auto-calculated, read-only styled)
+            // Rate (editable unit price; drives line total)
             html +=
-                '<td><span class="doc-rate-label" data-idx="' + idx + '"' +
-                ' style="font-size:0.9em;color:var(--text-muted);">' +
-                format_currency(rate) + '</span></td>';
+                '<td><input type="number" class="review-input doc-rate" data-idx="' + idx + '"' +
+                ' step="any" style="width:90px;" value="' + _fmt_rate(rate) + '" /></td>';
 
             // Total (bold, from extraction)
             html +=
@@ -545,6 +544,11 @@ function _render_review_ui(frm, options) {
         frm.dirty();
         var idx = $(this).data("idx");
         _recalc_qty_cell(wrapper, idx);
+    });
+    wrapper.find(".doc-rate").on("change", function () {
+        frm.dirty();
+        var idx = $(this).data("idx");
+        _on_rate_change(wrapper, idx);
     });
 
     // Mark form dirty when any review input changes
@@ -988,6 +992,32 @@ function _set_stock_uom_editable(wrapper, idx) {
 // Compact quantity cell helpers
 // =================================================================
 
+// Strip floating-point noise from a derived rate for display in the input.
+function _fmt_rate(val) {
+    if (!val) return 0;
+    return Math.round(val * 1e6) / 1e6;
+}
+
+// User edited the unit price directly: line total = rate × doc qty.
+// The line total is the canonical stored value (data-line-total), so update
+// it here and let collection derive unit_price/total_price from it.
+function _on_rate_change(wrapper, idx) {
+    var $cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
+    if (!$cell.length) return;
+
+    var doc_qty = parseFloat($cell.find(".doc-qty").val()) || 0;
+    var rate = parseFloat(wrapper.find('.doc-rate[data-idx="' + idx + '"]').val()) || 0;
+    var line_total = rate * doc_qty;
+
+    $cell.data("line-total", line_total);
+
+    wrapper.find('.line-total[data-idx="' + idx + '"]').html(
+        "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
+    );
+
+    _validate_rate(wrapper, idx, rate, line_total, doc_qty);
+}
+
 function _recalc_qty_cell(wrapper, idx) {
     var $cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
     if (!$cell.length) return;
@@ -1000,13 +1030,12 @@ function _recalc_qty_cell(wrapper, idx) {
     var factor = doc_qty > 0 ? stock_qty / doc_qty : 1;
     var is_bulk = factor > 1 && Number.isInteger(factor);
 
-    // Update rate label (compact: "× €0.04")
-    $cell.find('.doc-rate-label[data-idx="' + idx + '"]').html(
-        "&times;&thinsp;" + format_currency(rate)
-    );
+    // Update rate input (derived from fixed line total) — sits in a sibling
+    // <td>, so query from the row wrapper, not the qty-uom-cell.
+    wrapper.find('.doc-rate[data-idx="' + idx + '"]').val(_fmt_rate(rate));
 
     // Update total
-    $cell.find('.line-total[data-idx="' + idx + '"]').html(
+    wrapper.find('.line-total[data-idx="' + idx + '"]').html(
         "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
     );
 
