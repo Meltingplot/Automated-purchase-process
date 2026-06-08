@@ -133,6 +133,7 @@ frappe.ui.form.on("AI Procurement Job", {
             frm.doc.reviewed_data = JSON.stringify(data.reviewed);
             frm.doc.item_mapping = JSON.stringify(data.item_mapping);
             frm.doc.stock_uom_mapping = JSON.stringify(data.stock_uom_mapping);
+            frm.doc.supplier_mapping = data.supplier_mapping || null;
         }
     },
     source_document: function (frm) {
@@ -160,7 +161,7 @@ var _DOCUMENT_FIELDS = [
     { key: "order_reference", label: "Order Reference", type: "text" },
     { key: "delivery_date", label: "Delivery Date", type: "date" },
     { key: "payment_terms", label: "Payment Terms", type: "text" },
-    { key: "currency", label: "Currency", type: "text" },
+    { key: "currency", label: "Currency", type: "link", link_doctype: "Currency" },
 ];
 
 var _TOTALS_FIELDS = [
@@ -244,12 +245,22 @@ function _add_reject_button(frm) {
 
 function _render_field_input(f, val, confidence_map) {
     var escaped = frappe.utils.escape_html(String(val === null || val === undefined ? "" : val));
+    var conf_class = _confidence_class(confidence_map[f.key]);
+    var label_html = '<label style="font-size:0.8em;color:var(--text-muted);margin-bottom:2px;display:block;">' +
+        __(f.label) + '</label>';
+
+    // Link fields (e.g. Currency) render as a Frappe Link control placeholder,
+    // wired up later in _render_review_ui.
+    if (f.type === "link") {
+        return '<div class="' + conf_class + '" style="margin-bottom:8px;">' + label_html +
+            '<div class="header-link-control" data-field="' + f.key + '"' +
+            ' data-doctype="' + f.link_doctype + '"' +
+            ' data-initial-value="' + escaped + '"></div></div>';
+    }
+
     var input_type = f.type === "number" ? "number" : f.type === "date" ? "date" : "text";
     var step_attr = f.type === "number" ? ' step="any"' : "";
-    var conf_class = _confidence_class(confidence_map[f.key]);
-    return '<div class="' + conf_class + '" style="margin-bottom:8px;">' +
-        '<label style="font-size:0.8em;color:var(--text-muted);margin-bottom:2px;display:block;">' +
-        __(f.label) + '</label>' +
+    return '<div class="' + conf_class + '" style="margin-bottom:8px;">' + label_html +
         '<input type="' + input_type + '" class="review-input review-field"' +
         ' data-field="' + f.key + '" value="' + escaped + '"' + step_attr + ' />' +
         '</div>';
@@ -286,6 +297,12 @@ function _render_review_ui(frm, options) {
     html += '<h6>' + __("Supplier") + '</h6>';
     html += '<div class="supplier-match-badge" style="margin-bottom:10px;">' +
         '<span class="text-muted" style="font-size:0.85em;">' + __("Checking...") + '</span></div>';
+    // Explicit "assign existing supplier" link control — overrides fuzzy
+    // matching when the extracted name doesn't match an existing supplier.
+    html += '<div style="margin-bottom:8px;">' +
+        '<label style="font-size:0.8em;color:var(--text-muted);margin-bottom:2px;display:block;">' +
+        __("Assign existing supplier") + '</label>' +
+        '<div class="supplier-link-control"></div></div>';
     _SUPPLIER_FIELDS.forEach(function (f) {
         html += _render_field_input(f, consensus[f.key], confidence_map);
     });
@@ -365,11 +382,10 @@ function _render_review_ui(frm, options) {
                 ' style="display:none;font-size:0.8em;color:#c53030;margin-top:2px;"></div>' +
                 '</td>';
 
-            // Rate (auto-calculated, read-only styled)
+            // Rate (editable unit price; drives line total)
             html +=
-                '<td><span class="doc-rate-label" data-idx="' + idx + '"' +
-                ' style="font-size:0.9em;color:var(--text-muted);">' +
-                format_currency(rate) + '</span></td>';
+                '<td><input type="number" class="review-input doc-rate" data-idx="' + idx + '"' +
+                ' step="any" style="width:90px;" value="' + _fmt_rate(rate) + '" /></td>';
 
             // Total (bold, from extraction)
             html +=
@@ -512,6 +528,55 @@ function _render_review_ui(frm, options) {
         }
     });
 
+    // Create the "Assign existing supplier" Link control
+    wrapper.find(".supplier-link-control").each(function () {
+        var $el = $(this);
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "supplier_assign",
+                options: "Supplier",
+                placeholder: __("Auto (from extracted name)"),
+                change: function () {
+                    frm.dirty();
+                },
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        $el.data("control", control);
+        // Restore a previously assigned supplier
+        if (frm.doc.supplier_mapping) {
+            control.set_value(frm.doc.supplier_mapping);
+        }
+    });
+
+    // Create Frappe Link controls for header Link fields (e.g. Currency)
+    wrapper.find(".header-link-control").each(function () {
+        var $el = $(this);
+        var field_key = $el.data("field");
+        var link_doctype = $el.data("doctype");
+        var initial_val = $el.data("initial-value");
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "header_" + field_key,
+                options: link_doctype,
+                change: function () {
+                    frm.dirty();
+                },
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        if (initial_val) {
+            control.set_value(String(initial_val));
+        }
+        $el.data("control", control);
+    });
+
     // Create Frappe Link controls for Stock UOM fields
     wrapper.find(".stock-uom-control").each(function () {
         var $el = $(this);
@@ -545,6 +610,11 @@ function _render_review_ui(frm, options) {
         frm.dirty();
         var idx = $(this).data("idx");
         _recalc_qty_cell(wrapper, idx);
+    });
+    wrapper.find(".doc-rate").on("change", function () {
+        frm.dirty();
+        var idx = $(this).data("idx");
+        _on_rate_change(wrapper, idx);
     });
 
     // Mark form dirty when any review input changes
@@ -777,6 +847,16 @@ function _collect_review_data(frm) {
         }
     });
 
+    // Collect header Link fields (e.g. Currency) from their controls
+    wrapper.find(".header-link-control").each(function () {
+        var $el = $(this);
+        var field_key = $el.data("field");
+        var control = $el.data("control");
+        if (control) {
+            reviewed[field_key] = control.get_value() || "";
+        }
+    });
+
     // Collect item fields (text inputs from _ITEM_FIELDS + compact quantity cell)
     var items = consensus.items ? consensus.items.slice() : [];
     wrapper.find(".review-item-field").each(function () {
@@ -831,10 +911,21 @@ function _collect_review_data(frm) {
         stock_uom_mapping[idx] = val || null;
     });
 
+    // Collect assigned supplier (overrides fuzzy matching when set)
+    var supplier_mapping = "";
+    var $supplier_link = wrapper.find(".supplier-link-control");
+    if ($supplier_link.length) {
+        var supplier_ctrl = $supplier_link.data("control");
+        if (supplier_ctrl) {
+            supplier_mapping = supplier_ctrl.get_value() || "";
+        }
+    }
+
     return {
         reviewed: reviewed,
         item_mapping: item_mapping,
         stock_uom_mapping: stock_uom_mapping,
+        supplier_mapping: supplier_mapping,
     };
 }
 
@@ -842,6 +933,7 @@ function _save_review_data(frm, data) {
     frm.set_value("reviewed_data", JSON.stringify(data.reviewed));
     frm.set_value("item_mapping", JSON.stringify(data.item_mapping));
     frm.set_value("stock_uom_mapping", JSON.stringify(data.stock_uom_mapping));
+    frm.set_value("supplier_mapping", data.supplier_mapping || null);
     return frm.save();
 }
 
@@ -851,6 +943,7 @@ function _collect_and_approve(frm) {
         reviewed_data: JSON.stringify(data.reviewed),
         item_mapping: JSON.stringify(data.item_mapping),
         stock_uom_mapping: JSON.stringify(data.stock_uom_mapping),
+        supplier_mapping: data.supplier_mapping || "",
     }).then(function () {
         frm.reload_doc();
     });
@@ -988,6 +1081,32 @@ function _set_stock_uom_editable(wrapper, idx) {
 // Compact quantity cell helpers
 // =================================================================
 
+// Strip floating-point noise from a derived rate for display in the input.
+function _fmt_rate(val) {
+    if (!val) return 0;
+    return Math.round(val * 1e6) / 1e6;
+}
+
+// User edited the unit price directly: line total = rate × doc qty.
+// The line total is the canonical stored value (data-line-total), so update
+// it here and let collection derive unit_price/total_price from it.
+function _on_rate_change(wrapper, idx) {
+    var $cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
+    if (!$cell.length) return;
+
+    var doc_qty = parseFloat($cell.find(".doc-qty").val()) || 0;
+    var rate = parseFloat(wrapper.find('.doc-rate[data-idx="' + idx + '"]').val()) || 0;
+    var line_total = rate * doc_qty;
+
+    $cell.data("line-total", line_total);
+
+    wrapper.find('.line-total[data-idx="' + idx + '"]').html(
+        "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
+    );
+
+    _validate_rate(wrapper, idx, rate, line_total, doc_qty);
+}
+
 function _recalc_qty_cell(wrapper, idx) {
     var $cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
     if (!$cell.length) return;
@@ -1000,13 +1119,12 @@ function _recalc_qty_cell(wrapper, idx) {
     var factor = doc_qty > 0 ? stock_qty / doc_qty : 1;
     var is_bulk = factor > 1 && Number.isInteger(factor);
 
-    // Update rate label (compact: "× €0.04")
-    $cell.find('.doc-rate-label[data-idx="' + idx + '"]').html(
-        "&times;&thinsp;" + format_currency(rate)
-    );
+    // Update rate input (derived from fixed line total) — sits in a sibling
+    // <td>, so query from the row wrapper, not the qty-uom-cell.
+    wrapper.find('.doc-rate[data-idx="' + idx + '"]').val(_fmt_rate(rate));
 
     // Update total
-    $cell.find('.line-total[data-idx="' + idx + '"]').html(
+    wrapper.find('.line-total[data-idx="' + idx + '"]').html(
         "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
     );
 

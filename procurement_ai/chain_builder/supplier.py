@@ -16,16 +16,28 @@ from ..validation.supplier_matcher import SupplierMatcher
 logger = logging.getLogger(__name__)
 
 
-def ensure_supplier(extracted_data: dict) -> str:
+def ensure_supplier(extracted_data: dict, forced_supplier: str | None = None) -> str:
     """
     Find existing supplier or create a new one.
 
     Args:
         extracted_data: Consensus extraction data
+        forced_supplier: Supplier name explicitly assigned by the user in the
+            review UI. When set and the Supplier exists, it is used directly,
+            bypassing all fuzzy matching and creation.
 
     Returns:
         Supplier name (frappe document name)
     """
+    if forced_supplier:
+        if frappe.db.exists("Supplier", forced_supplier):
+            logger.info(f"Using user-assigned supplier '{forced_supplier}'")
+            return forced_supplier
+        logger.warning(
+            f"User-assigned supplier '{forced_supplier}' not found; "
+            "falling back to automatic matching"
+        )
+
     match = SupplierMatcher.find_match(extracted_data)
 
     if match.found:

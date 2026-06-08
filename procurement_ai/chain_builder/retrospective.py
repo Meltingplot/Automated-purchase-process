@@ -59,6 +59,7 @@ class RetrospectiveChainBuilder:
         job_name: str,
         item_mapping: dict | None = None,
         stock_uom_mapping: dict | None = None,
+        supplier_mapping: str | None = None,
     ) -> dict:
         """
         Find or create the full document chain from extracted data.
@@ -78,6 +79,8 @@ class RetrospectiveChainBuilder:
             job_name: AI Procurement Job name
             item_mapping: Optional user-reviewed mapping of item index to
                           ERPNext Item code. Skips _resolve_item for mapped items.
+            supplier_mapping: Optional Supplier name explicitly assigned by the
+                          user. Bypasses fuzzy matching/creation when set.
 
         Returns:
             Dict with links to all created/matched documents + attachments.
@@ -89,7 +92,7 @@ class RetrospectiveChainBuilder:
         result: dict = {}
 
         # 1. Ensure supplier exists
-        supplier = ensure_supplier(extracted_data)
+        supplier = ensure_supplier(extracted_data, forced_supplier=supplier_mapping)
         result["supplier"] = supplier
 
         # 2. Determine which docs are needed

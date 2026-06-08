@@ -90,9 +90,8 @@ def create_purchase_order(
         "items": items,
     }
 
-    # Set invoice currency — ERPNext auto-populates conversion_rate
-    if extracted_data.get("currency"):
-        po_data["currency"] = extracted_data["currency"]
+    # Set transaction currency + conversion rate (book foreign docs in base currency)
+    _apply_document_currency(po_data, extracted_data, settings, doc_date)
 
     # Store order_reference as order_confirmation_no for future matching
     order_ref = extracted_data.get("order_reference", "").strip()
@@ -543,6 +542,56 @@ def _is_numeric_uom(uom_name: str) -> bool:
         return float(uom_name) > 0
     except (TypeError, ValueError):
         return False
+
+
+def _apply_document_currency(
+    doc_data: dict, extracted_data: dict, settings: dict, posting_date: str,
+) -> None:
+    """Set the transaction currency and, for foreign-currency documents, the
+    conversion rate to the company's base currency.
+
+    The document keeps its own currency (e.g. a USD-only invoice stays USD),
+    but ERPNext books the General Ledger in the company base currency (e.g.
+    EUR) via ``conversion_rate``. For base-currency documents nothing extra is
+    needed (conversion_rate stays 1).
+    """
+    currency = (extracted_data.get("currency") or "").strip()
+    if not currency:
+        return
+    doc_data["currency"] = currency
+
+    company = settings.get("default_company")
+    company_currency = (
+        frappe.get_cached_value("Company", company, "default_currency")
+        if company else None
+    )
+    if not company_currency or currency == company_currency:
+        return  # base-currency document — conversion_rate stays 1
+
+    # Foreign currency: fetch the rate to the base currency for the posting date
+    try:
+        from erpnext.setup.utils import get_exchange_rate
+
+        rate = get_exchange_rate(
+            currency, company_currency, posting_date, args="for_buying",
+        )
+    except Exception as e:  # noqa: BLE001 — rate lookup is best-effort
+        logger.warning(
+            f"Could not fetch exchange rate {currency}->{company_currency}: {e}"
+        )
+        rate = 0
+
+    if rate and flt(rate) > 0:
+        doc_data["conversion_rate"] = flt(rate)
+        logger.info(
+            f"Foreign-currency document {currency}: booking in {company_currency} "
+            f"at conversion_rate {flt(rate)}"
+        )
+    else:
+        logger.warning(
+            f"No exchange rate {currency}->{company_currency} for {posting_date}. "
+            "Add a Currency Exchange record or set the rate manually on the document."
+        )
 
 
 def _get_currency_precision(currency: str | None) -> int:
