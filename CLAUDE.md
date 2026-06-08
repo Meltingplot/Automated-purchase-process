@@ -186,6 +186,12 @@ PO and PI include `Purchase Taxes and Charges` rows built from the per-item `tax
 
 Prompts explicitly instruct LLMs to return **NET amounts** (before tax / Netto) for all monetary fields (`unit_price`, `total_price`, `subtotal`, `total_amount`). This matches ERPNext's expectation where tax is applied separately via Tax Templates. The `OutputGuard` plausibility check accepts both net-style (`items + tax = total`) and gross-style (`items = total`) totals without false-flagging.
 
+### Currency Handling
+
+Prompts instruct LLMs to **prefer EUR** when a document shows amounts in more than one currency (extract the EUR values, set `currency: "EUR"`). The review UI exposes `currency` as a **Link control (Currency doctype)** so the user can override the extracted currency; per-item rates are independently editable to enter the values in the chosen currency.
+
+`_apply_document_currency()` in `purchase_order.py` (reused by PR/PI) sets the transaction `currency` on each document. For **foreign-currency documents** (currency ≠ company base currency), it fetches `conversion_rate` via ERPNext's `get_exchange_rate(currency, company_currency, posting_date, args="for_buying")` so the document keeps its own currency (e.g. USD) but the General Ledger is booked in the company base currency (e.g. EUR). Base-currency documents leave `conversion_rate` at 1. If no exchange rate is available, it logs a warning and leaves the rate unset (ERPNext then requires a Currency Exchange record).
+
 ### LLM Provider Support
 
 Cloud providers via LangChain: Claude (`langchain-anthropic`), OpenAI (`langchain-openai`), Gemini (`langchain-google-genai`).

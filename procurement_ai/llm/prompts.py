@@ -40,6 +40,7 @@ RULES:
 8. All monetary amounts (unit_price, total_price, subtotal, total_amount, shipping_cost) MUST be NET amounts (before tax / Netto / ohne MwSt). Extract the tax rate per item in tax_rate.
 9. subtotal = sum of all item total_price values. total_amount = subtotal + tax_amount + shipping_cost.
 10. For each item, set item_type to "stock" for physical/tangible goods or "service" for services, fees, shipping, licenses, consulting, installation, etc.
+11. If the document shows amounts in more than one currency (e.g. both EUR and USD), PREFER EUR: extract the EUR values for all monetary fields and set currency to "EUR". Only use a non-EUR currency when EUR amounts are not present in the document.
 
 You MUST respond in the following JSON format:
 {schema}"""
@@ -123,6 +124,7 @@ IMPORTANT:
 - Respond ONLY as JSON.
 - All prices and shipping_cost MUST be NET (before tax / Netto). Put the tax rate in tax_rate per item.
 - subtotal = sum of item total_price. total_amount = subtotal + tax_amount + shipping.
+- If amounts appear in multiple currencies, prefer EUR: extract the EUR values and set currency to "EUR".
 
 Example response:
 {few_shot_example}
@@ -139,7 +141,7 @@ Schema fields:
 - order_reference: Reference to related order (optional)
 - delivery_date: Expected delivery date (optional)
 - payment_terms: Payment terms text (optional)
-- currency: Currency code, default "EUR"
+- currency: Currency code, default "EUR". If amounts appear in multiple currencies, prefer EUR and extract the EUR values.
 - items: List of line items, each with: item_name, quantity, uom, unit_price, total_price, tax_rate, item_type ("stock" or "service")
 - subtotal: Net total before tax (optional)
 - tax_amount: Total tax (optional)

@@ -161,7 +161,7 @@ var _DOCUMENT_FIELDS = [
     { key: "order_reference", label: "Order Reference", type: "text" },
     { key: "delivery_date", label: "Delivery Date", type: "date" },
     { key: "payment_terms", label: "Payment Terms", type: "text" },
-    { key: "currency", label: "Currency", type: "text" },
+    { key: "currency", label: "Currency", type: "link", link_doctype: "Currency" },
 ];
 
 var _TOTALS_FIELDS = [
@@ -245,12 +245,22 @@ function _add_reject_button(frm) {
 
 function _render_field_input(f, val, confidence_map) {
     var escaped = frappe.utils.escape_html(String(val === null || val === undefined ? "" : val));
+    var conf_class = _confidence_class(confidence_map[f.key]);
+    var label_html = '<label style="font-size:0.8em;color:var(--text-muted);margin-bottom:2px;display:block;">' +
+        __(f.label) + '</label>';
+
+    // Link fields (e.g. Currency) render as a Frappe Link control placeholder,
+    // wired up later in _render_review_ui.
+    if (f.type === "link") {
+        return '<div class="' + conf_class + '" style="margin-bottom:8px;">' + label_html +
+            '<div class="header-link-control" data-field="' + f.key + '"' +
+            ' data-doctype="' + f.link_doctype + '"' +
+            ' data-initial-value="' + escaped + '"></div></div>';
+    }
+
     var input_type = f.type === "number" ? "number" : f.type === "date" ? "date" : "text";
     var step_attr = f.type === "number" ? ' step="any"' : "";
-    var conf_class = _confidence_class(confidence_map[f.key]);
-    return '<div class="' + conf_class + '" style="margin-bottom:8px;">' +
-        '<label style="font-size:0.8em;color:var(--text-muted);margin-bottom:2px;display:block;">' +
-        __(f.label) + '</label>' +
+    return '<div class="' + conf_class + '" style="margin-bottom:8px;">' + label_html +
         '<input type="' + input_type + '" class="review-input review-field"' +
         ' data-field="' + f.key + '" value="' + escaped + '"' + step_attr + ' />' +
         '</div>';
@@ -542,6 +552,31 @@ function _render_review_ui(frm, options) {
         }
     });
 
+    // Create Frappe Link controls for header Link fields (e.g. Currency)
+    wrapper.find(".header-link-control").each(function () {
+        var $el = $(this);
+        var field_key = $el.data("field");
+        var link_doctype = $el.data("doctype");
+        var initial_val = $el.data("initial-value");
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "header_" + field_key,
+                options: link_doctype,
+                change: function () {
+                    frm.dirty();
+                },
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        if (initial_val) {
+            control.set_value(String(initial_val));
+        }
+        $el.data("control", control);
+    });
+
     // Create Frappe Link controls for Stock UOM fields
     wrapper.find(".stock-uom-control").each(function () {
         var $el = $(this);
@@ -809,6 +844,16 @@ function _collect_review_data(frm) {
             reviewed[field_key] = val ? parseFloat(val) : null;
         } else {
             reviewed[field_key] = val;
+        }
+    });
+
+    // Collect header Link fields (e.g. Currency) from their controls
+    wrapper.find(".header-link-control").each(function () {
+        var $el = $(this);
+        var field_key = $el.data("field");
+        var control = $el.data("control");
+        if (control) {
+            reviewed[field_key] = control.get_value() || "";
         }
     });
 

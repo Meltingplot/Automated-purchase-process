@@ -76,9 +76,10 @@ def create_purchase_invoice(
         "items": items,
     }
 
-    # Set invoice currency — ERPNext auto-populates conversion_rate
-    if extracted_data.get("currency"):
-        pi_data["currency"] = extracted_data["currency"]
+    # Set transaction currency + conversion rate (book foreign docs in base currency)
+    from .purchase_order import _apply_document_currency
+
+    _apply_document_currency(pi_data, extracted_data, settings, doc_date)
 
     taxes = _build_taxes(extracted_data, settings)
     if taxes:
