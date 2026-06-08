@@ -569,9 +569,9 @@ def _apply_document_currency(
         return  # base-currency document — conversion_rate stays 1
 
     # Foreign currency: fetch the rate to the base currency for the posting date
-    from erpnext.setup.utils import get_exchange_rate
-
     try:
+        from erpnext.setup.utils import get_exchange_rate
+
         rate = get_exchange_rate(
             currency, company_currency, posting_date, args="for_buying",
         )

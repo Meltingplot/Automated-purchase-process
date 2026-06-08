@@ -62,6 +62,10 @@ def _reset():
     frappe_mock.get_all.side_effect = None
     frappe_mock.get_all.return_value = []
     frappe_mock.generate_hash.return_value = "ABCD1234"
+    # Company base currency matches the document currency (EUR), so
+    # _apply_document_currency takes the base-currency path (no exchange rate).
+    frappe_mock.get_cached_value.side_effect = None
+    frappe_mock.get_cached_value.return_value = "EUR"
 
 
 def _setup_mock_doc(name="PO-TEST-001"):
