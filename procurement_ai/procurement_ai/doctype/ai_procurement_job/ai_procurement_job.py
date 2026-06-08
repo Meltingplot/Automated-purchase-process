@@ -49,7 +49,7 @@ class AIProcurementJob(Document):
         frappe.msgprint(f"Processing started for {self.name}", alert=True)
 
     @frappe.whitelist()
-    def approve_and_create(self, reviewed_data: str | None = None, item_mapping: str | None = None, stock_uom_mapping: str | None = None):
+    def approve_and_create(self, reviewed_data: str | None = None, item_mapping: str | None = None, stock_uom_mapping: str | None = None, supplier_mapping: str | None = None):
         """Approve reviewed data and trigger document chain creation.
 
         Accepts review data inline to avoid a separate save round-trip
@@ -87,6 +87,15 @@ class AIProcurementJob(Document):
             self.item_mapping = item_mapping if isinstance(item_mapping, str) else json.dumps(item_mapping)
         if stock_uom_mapping is not None:
             self.stock_uom_mapping = stock_uom_mapping if isinstance(stock_uom_mapping, str) else json.dumps(stock_uom_mapping)
+        if supplier_mapping is not None:
+            # Validate the assigned supplier exists before storing
+            supplier_mapping = supplier_mapping.strip()
+            if supplier_mapping and not frappe.db.exists("Supplier", supplier_mapping):
+                frappe.throw(
+                    _("Assigned supplier '{0}' does not exist.").format(supplier_mapping),
+                    title=_("Invalid Supplier"),
+                )
+            self.supplier_mapping = supplier_mapping or None
 
         self.status = "Processing"
         self.save()
@@ -131,7 +140,7 @@ class AIProcurementJob(Document):
         from ....chain_builder.purchase_order import _resolve_item, _try_resolve_item
 
         clean = sanitize_extracted_data(data)
-        supplier = ensure_supplier(clean)
+        supplier = ensure_supplier(clean, forced_supplier=self.supplier_mapping or None)
 
         item_mapping = json.loads(self.item_mapping or "{}")
         stock_uom_mapping = json.loads(self.stock_uom_mapping or "{}")
@@ -209,14 +218,25 @@ class AIProcurementJob(Document):
         # Check supplier
         from ....validation.supplier_matcher import SupplierMatcher
 
-        supplier_match = SupplierMatcher.find_match(clean)
-        supplier_info = None
-        if supplier_match.found:
+        forced_supplier = self.supplier_mapping or None
+        if forced_supplier and frappe.db.exists("Supplier", forced_supplier):
             supplier_info = {
-                "name": supplier_match.supplier_name,
-                "method": supplier_match.match_method,
-                "confidence": supplier_match.match_confidence,
+                "name": forced_supplier,
+                "method": "assigned",
+                "confidence": 1.0,
             }
+            resolved_supplier_name = forced_supplier
+        else:
+            supplier_match = SupplierMatcher.find_match(clean)
+            supplier_info = None
+            resolved_supplier_name = ""
+            if supplier_match.found:
+                supplier_info = {
+                    "name": supplier_match.supplier_name,
+                    "method": supplier_match.match_method,
+                    "confidence": supplier_match.match_confidence,
+                }
+                resolved_supplier_name = supplier_match.supplier_name
 
         # Check each item (try_resolve only, no creation) + UOM adjustment
         from ....chain_builder.purchase_order import (
@@ -230,7 +250,7 @@ class AIProcurementJob(Document):
         settings = settings_doc.get_settings_dict()
         if self.company:
             settings["default_company"] = self.company
-        supplier_name = supplier_match.supplier_name if supplier_match.found else ""
+        supplier_name = resolved_supplier_name
         invoice_currency = clean.get("currency")
 
         items_info = []

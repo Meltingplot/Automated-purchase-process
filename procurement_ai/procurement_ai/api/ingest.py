@@ -422,6 +422,9 @@ def run_chain_from_review(procurement_job_name: str):
             if not stock_uom_mapping:
                 stock_uom_mapping = None
 
+        # User-assigned supplier (overrides fuzzy matching when set)
+        supplier_mapping = job.supplier_mapping or None
+
         source_type = job.detected_type or "Invoice"
         source_file_url = job.source_document_url or job.source_document
 
@@ -436,6 +439,7 @@ def run_chain_from_review(procurement_job_name: str):
             job_name=job_name,
             item_mapping=item_mapping,
             stock_uom_mapping=stock_uom_mapping,
+            supplier_mapping=supplier_mapping,
         )
 
         _complete_job(job, None, consensus_data, source_type, created)

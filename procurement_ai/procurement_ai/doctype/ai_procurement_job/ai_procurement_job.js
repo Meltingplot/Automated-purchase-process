@@ -133,6 +133,7 @@ frappe.ui.form.on("AI Procurement Job", {
             frm.doc.reviewed_data = JSON.stringify(data.reviewed);
             frm.doc.item_mapping = JSON.stringify(data.item_mapping);
             frm.doc.stock_uom_mapping = JSON.stringify(data.stock_uom_mapping);
+            frm.doc.supplier_mapping = data.supplier_mapping || null;
         }
     },
     source_document: function (frm) {
@@ -286,6 +287,12 @@ function _render_review_ui(frm, options) {
     html += '<h6>' + __("Supplier") + '</h6>';
     html += '<div class="supplier-match-badge" style="margin-bottom:10px;">' +
         '<span class="text-muted" style="font-size:0.85em;">' + __("Checking...") + '</span></div>';
+    // Explicit "assign existing supplier" link control — overrides fuzzy
+    // matching when the extracted name doesn't match an existing supplier.
+    html += '<div style="margin-bottom:8px;">' +
+        '<label style="font-size:0.8em;color:var(--text-muted);margin-bottom:2px;display:block;">' +
+        __("Assign existing supplier") + '</label>' +
+        '<div class="supplier-link-control"></div></div>';
     _SUPPLIER_FIELDS.forEach(function (f) {
         html += _render_field_input(f, consensus[f.key], confidence_map);
     });
@@ -508,6 +515,30 @@ function _render_review_ui(frm, options) {
             if (control) {
                 control.set_value(saved_mapping[idx]);
             }
+        }
+    });
+
+    // Create the "Assign existing supplier" Link control
+    wrapper.find(".supplier-link-control").each(function () {
+        var $el = $(this);
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "supplier_assign",
+                options: "Supplier",
+                placeholder: __("Auto (from extracted name)"),
+                change: function () {
+                    frm.dirty();
+                },
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        $el.data("control", control);
+        // Restore a previously assigned supplier
+        if (frm.doc.supplier_mapping) {
+            control.set_value(frm.doc.supplier_mapping);
         }
     });
 
@@ -835,10 +866,21 @@ function _collect_review_data(frm) {
         stock_uom_mapping[idx] = val || null;
     });
 
+    // Collect assigned supplier (overrides fuzzy matching when set)
+    var supplier_mapping = "";
+    var $supplier_link = wrapper.find(".supplier-link-control");
+    if ($supplier_link.length) {
+        var supplier_ctrl = $supplier_link.data("control");
+        if (supplier_ctrl) {
+            supplier_mapping = supplier_ctrl.get_value() || "";
+        }
+    }
+
     return {
         reviewed: reviewed,
         item_mapping: item_mapping,
         stock_uom_mapping: stock_uom_mapping,
+        supplier_mapping: supplier_mapping,
     };
 }
 
@@ -846,6 +888,7 @@ function _save_review_data(frm, data) {
     frm.set_value("reviewed_data", JSON.stringify(data.reviewed));
     frm.set_value("item_mapping", JSON.stringify(data.item_mapping));
     frm.set_value("stock_uom_mapping", JSON.stringify(data.stock_uom_mapping));
+    frm.set_value("supplier_mapping", data.supplier_mapping || null);
     return frm.save();
 }
 
@@ -855,6 +898,7 @@ function _collect_and_approve(frm) {
         reviewed_data: JSON.stringify(data.reviewed),
         item_mapping: JSON.stringify(data.item_mapping),
         stock_uom_mapping: JSON.stringify(data.stock_uom_mapping),
+        supplier_mapping: data.supplier_mapping || "",
     }).then(function () {
         frm.reload_doc();
     });
