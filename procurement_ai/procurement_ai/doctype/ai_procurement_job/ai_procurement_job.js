@@ -275,6 +275,7 @@ function _render_review_ui(frm, options) {
     }
 
     var confidence_map = _compute_confidence(frm);
+    var doc_currency = consensus.currency || null;
     var html = _REVIEW_CSS;
     html += '<div class="review-ui" style="padding:10px;">';
 
@@ -391,7 +392,7 @@ function _render_review_ui(frm, options) {
             html +=
                 '<td><span class="line-total" data-idx="' + idx + '"' +
                 ' style="font-weight:600;">' +
-                format_currency(total) + '</span></td>';
+                format_currency(total, doc_currency) + '</span></td>';
 
             // Map to Item
             html +=
@@ -565,6 +566,11 @@ function _render_review_ui(frm, options) {
                 options: link_doctype,
                 change: function () {
                     frm.dirty();
+                    // When the document currency changes, re-render line-item
+                    // amounts so they show the selected currency's symbol.
+                    if (field_key === "currency") {
+                        _refresh_currency_display(wrapper);
+                    }
                 },
             },
             parent: $el,
@@ -631,13 +637,20 @@ function _render_review_ui(frm, options) {
 
     // Async: fetch grand totals for comparison panel
     if (options.show_comparison) {
+        var cmp_currency = _review_currency(wrapper) || consensus.currency || null;
         wrapper.find(".comparison-doc-row").each(function () {
             var $row = $(this);
             var doctype = $row.data("doctype");
             var name = $row.data("name");
             frappe.db.get_value(doctype, name, "grand_total", function (r) {
-                if (r && r.grand_total !== undefined) {
-                    $row.find(".doc-grand-total").text("(" + __("Grand Total") + ": " + format_currency(r.grand_total) + ")");
+                if (r && r.grand_total !== undefined && r.grand_total !== null) {
+                    // Store the raw numeric value for the delta calc — parsing the
+                    // formatted text breaks on locale separators (e.g. "456,45").
+                    var gt = parseFloat(r.grand_total) || 0;
+                    $row.data("grand-total", gt);
+                    $row.find(".doc-grand-total").text(
+                        "(" + __("Grand Total") + ": " + format_currency(gt, cmp_currency) + ")"
+                    );
                 }
             });
         });
@@ -646,10 +659,9 @@ function _render_review_ui(frm, options) {
             var extracted_total = parseFloat(consensus.total_amount) || 0;
             var $delta = wrapper.find(".comparison-delta");
             var doc_totals = [];
-            wrapper.find(".doc-grand-total").each(function () {
-                var text = $(this).text();
-                var match = text.match(/([\d.,]+)/);
-                if (match) doc_totals.push(parseFloat(match[1].replace(",", "")));
+            wrapper.find(".comparison-doc-row").each(function () {
+                var gt = $(this).data("grand-total");
+                if (gt !== undefined && gt !== null) doc_totals.push(parseFloat(gt));
             });
             if (doc_totals.length > 0 && extracted_total > 0) {
                 var max_doc = Math.max.apply(null, doc_totals);
@@ -658,7 +670,7 @@ function _render_review_ui(frm, options) {
                 if (delta > 0.01) {
                     $delta.html(
                         '<span style="color:#c53030;">' +
-                        __("Delta") + ': ' + format_currency(delta) + ' (' + pct + '%)' +
+                        __("Delta") + ': ' + format_currency(delta, cmp_currency) + ' (' + pct + '%)' +
                         '</span>'
                     );
                 } else {
@@ -1087,6 +1099,32 @@ function _fmt_rate(val) {
     return Math.round(val * 1e6) / 1e6;
 }
 
+// The currency currently selected in the review header (falls back to the
+// extracted currency, then the system default). Used so line-item amounts are
+// formatted with the chosen currency's symbol, not the company default.
+function _review_currency(wrapper) {
+    var $cur = wrapper.find('.header-link-control[data-field="currency"]');
+    if ($cur.length) {
+        var ctrl = $cur.data("control");
+        if (ctrl && ctrl.get_value()) return ctrl.get_value();
+        var iv = $cur.data("initial-value");
+        if (iv) return String(iv);
+    }
+    return null;
+}
+
+// Re-render all line-item totals with the currently selected currency symbol.
+function _refresh_currency_display(wrapper) {
+    var currency = _review_currency(wrapper);
+    wrapper.find(".qty-uom-cell").each(function () {
+        var idx = $(this).data("idx");
+        var line_total = parseFloat($(this).data("line-total")) || 0;
+        wrapper.find('.line-total[data-idx="' + idx + '"]').html(
+            "=&thinsp;<strong>" + format_currency(line_total, currency) + "</strong>"
+        );
+    });
+}
+
 // User edited the unit price directly: line total = rate × doc qty.
 // The line total is the canonical stored value (data-line-total), so update
 // it here and let collection derive unit_price/total_price from it.
@@ -1101,7 +1139,7 @@ function _on_rate_change(wrapper, idx) {
     $cell.data("line-total", line_total);
 
     wrapper.find('.line-total[data-idx="' + idx + '"]').html(
-        "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
+        "=&thinsp;<strong>" + format_currency(line_total, _review_currency(wrapper)) + "</strong>"
     );
 
     _validate_rate(wrapper, idx, rate, line_total, doc_qty);
@@ -1125,7 +1163,7 @@ function _recalc_qty_cell(wrapper, idx) {
 
     // Update total
     wrapper.find('.line-total[data-idx="' + idx + '"]').html(
-        "=&thinsp;<strong>" + format_currency(line_total) + "</strong>"
+        "=&thinsp;<strong>" + format_currency(line_total, _review_currency(wrapper)) + "</strong>"
     );
 
     // Update factor info
