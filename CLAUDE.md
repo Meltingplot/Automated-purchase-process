@@ -180,7 +180,9 @@ German UOM aliases from LLM output are mapped to ERPNext standard UOMs (`_resolv
 
 ### Tax Handling
 
-PO and PI include `Purchase Taxes and Charges` rows built from the per-item `tax_rate` extracted by the LLM. Tax account is resolved from the company's default Purchase Taxes and Charges Template, falling back to the first Tax-type account.
+PO, PR and PI include `Purchase Taxes and Charges` rows (`_build_taxes()`) built from the per-item `tax_rate` extracted by the LLM. Tax account is resolved from the company's default Purchase Taxes and Charges Template, falling back to the first Tax-type account.
+
+Shipping (Versandkosten) and surcharge (Mindermengenaufschlag) are added as `charge_type="Actual"` rows with `category="Valuation and Total"` — these **Bezugsnebenkosten** must hit stock valuation (landed cost), not just the document total, so the received stock value is correct. VAT rows keep the default `category` ("Total") and reference the shipping row via `On Previous Row Total` when present.
 
 ### LLM Amount Convention
 

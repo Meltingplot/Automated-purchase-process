@@ -150,6 +150,8 @@ class TestBuildShippingCharges:
         assert len(result) == 1
         assert result[0]["charge_type"] == "Actual"
         assert result[0]["tax_amount"] == 5.99
+        # Bezugsnebenkosten must hit stock valuation (landed cost), not just total
+        assert result[0]["category"] == "Valuation and Total"
 
     def test_no_shipping_account_returns_empty(self):
         frappe_mock.get_all.return_value = []
