@@ -203,6 +203,8 @@ def _build_shipping_charges(extracted_data: dict, settings: dict) -> list[dict]:
             "tax_amount": shipping_amount,
             "description": "Shipping / Versandkosten",
             "add_deduct_tax": "Add",
+            # Bezugsnebenkosten: include in stock valuation (landed cost).
+            "category": "Valuation and Total",
         }
     ]
 
@@ -230,6 +232,9 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
                         "tax_amount": shipping_amount,
                         "description": "Shipping / Versandkosten",
                         "add_deduct_tax": "Add",
+                        # Bezugsnebenkosten: include in stock valuation (landed
+                        # cost) as well as the document total.
+                        "category": "Valuation and Total",
                     }
                 )
                 has_actual_rows = True
@@ -251,6 +256,8 @@ def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
                         "tax_amount": surcharge_amount,
                         "description": "Mindermengenaufschlag",
                         "add_deduct_tax": "Add",
+                        # Surcharge raises item cost → include in stock valuation.
+                        "category": "Valuation and Total",
                     }
                 )
                 has_actual_rows = True

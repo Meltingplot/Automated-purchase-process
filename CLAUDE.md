@@ -180,7 +180,9 @@ German UOM aliases from LLM output are mapped to ERPNext standard UOMs (`_resolv
 
 ### Tax Handling
 
-PO and PI include `Purchase Taxes and Charges` rows built from the per-item `tax_rate` extracted by the LLM. Tax account is resolved from the company's default Purchase Taxes and Charges Template, falling back to the first Tax-type account.
+PO, PR and PI include `Purchase Taxes and Charges` rows (`_build_taxes()`) built from the per-item `tax_rate` extracted by the LLM. Tax account is resolved from the company's default Purchase Taxes and Charges Template, falling back to the first Tax-type account.
+
+Shipping (Versandkosten) and surcharge (Mindermengenaufschlag) are added as `charge_type="Actual"` rows with `category="Valuation and Total"` — these **Bezugsnebenkosten** must hit stock valuation (landed cost), not just the document total, so the received stock value is correct. VAT rows keep the default `category` ("Total") and reference the shipping row via `On Previous Row Total` when present.
 
 ### LLM Amount Convention
 
@@ -188,9 +190,11 @@ Prompts explicitly instruct LLMs to return **NET amounts** (before tax / Netto) 
 
 ### Currency Handling
 
-Prompts instruct LLMs to **prefer EUR** when a document shows amounts in more than one currency (extract the EUR values, set `currency: "EUR"`). The review UI exposes `currency` as a **Link control (Currency doctype)** so the user can override the extracted currency; per-item rates are independently editable to enter the values in the chosen currency.
+Prompts instruct LLMs to **prefer EUR** when a document shows amounts in more than one currency (extract the EUR values, set `currency: "EUR"`). The review UI exposes `currency` as a **Link control (Currency doctype)** so the user can override the extracted currency; per-item rates are independently editable to enter the values in the chosen currency. The review UI always shows the **original** extracted currency (no conversion in the UI) so the reviewer can compare amounts against the source document.
 
-`_apply_document_currency()` in `purchase_order.py` (reused by PR/PI) sets the transaction `currency` on each document. For **foreign-currency documents** (currency ≠ company base currency), it fetches `conversion_rate` via ERPNext's `get_exchange_rate(currency, company_currency, posting_date, args="for_buying")` so the document keeps its own currency (e.g. USD) but the General Ledger is booked in the company base currency (e.g. EUR). Base-currency documents leave `conversion_rate` at 1. If no exchange rate is available, it logs a warning and leaves the rate unset (ERPNext then requires a Currency Exchange record).
+**All documents are booked in the company base currency** (no multi-currency sub-ledgers). `_convert_to_company_currency()` in `retrospective.py` runs once in `build_chain()` (after approval, before matching): for a foreign-currency document it multiplies every absolute monetary field (item `unit_price`/`total_price`, `subtotal`, `tax_amount`, `total_amount`, `shipping_cost`, `discount_amount`, `surcharge_amount`) by the exchange rate **at the document date** via ERPNext's `get_exchange_rate(currency, company_currency, document_date, args="for_buying")`; percentages (`tax_rate`, `discount_percent`) are left untouched. The whole chain (PO/PR/PI) is then created in the base currency, so ERPNext's `validate_party_account_currency` never trips (it otherwise rejects the *first* foreign-currency invoice of a supplier with no base-currency ledger history). If no exchange rate exists for the document date it raises a clear error pointing at the `Currency Exchange` record. Created docs get an audit comment recording the original currency, total, and applied rate (`_currency_note`). The review UI's comparison panel converts the extracted total with the same rate before computing the delta, so the displayed delta reflects a real mismatch, not the FX difference.
+
+`_apply_document_currency()` in `purchase_order.py` (reused by PR/PI) then just sets the transaction `currency` (now the base currency) with `conversion_rate` at 1 — it is a defensive no-op once conversion has run.
 
 ### LLM Provider Support
 

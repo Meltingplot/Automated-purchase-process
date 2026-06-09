@@ -637,19 +637,23 @@ function _render_review_ui(frm, options) {
 
     // Async: fetch grand totals for comparison panel
     if (options.show_comparison) {
-        var cmp_currency = _review_currency(wrapper) || consensus.currency || null;
+        var review_currency = _review_currency(wrapper) || consensus.currency || null;
         wrapper.find(".comparison-doc-row").each(function () {
             var $row = $(this);
             var doctype = $row.data("doctype");
             var name = $row.data("name");
-            frappe.db.get_value(doctype, name, "grand_total", function (r) {
+            // Fetch the doc's own currency too — created docs are booked in the
+            // company base currency, which may differ from the extracted currency.
+            frappe.db.get_value(doctype, name, ["grand_total", "currency"], function (r) {
                 if (r && r.grand_total !== undefined && r.grand_total !== null) {
                     // Store the raw numeric value for the delta calc — parsing the
                     // formatted text breaks on locale separators (e.g. "456,45").
                     var gt = parseFloat(r.grand_total) || 0;
+                    var doc_cur = r.currency || review_currency;
                     $row.data("grand-total", gt);
+                    $row.data("doc-currency", doc_cur);
                     $row.find(".doc-grand-total").text(
-                        "(" + __("Grand Total") + ": " + format_currency(gt, cmp_currency) + ")"
+                        "(" + __("Grand Total") + ": " + format_currency(gt, doc_cur) + ")"
                     );
                 }
             });
@@ -659,23 +663,60 @@ function _render_review_ui(frm, options) {
             var extracted_total = parseFloat(consensus.total_amount) || 0;
             var $delta = wrapper.find(".comparison-delta");
             var doc_totals = [];
+            var doc_currency = review_currency;
             wrapper.find(".comparison-doc-row").each(function () {
                 var gt = $(this).data("grand-total");
-                if (gt !== undefined && gt !== null) doc_totals.push(parseFloat(gt));
+                if (gt !== undefined && gt !== null) {
+                    doc_totals.push(parseFloat(gt));
+                    doc_currency = $(this).data("doc-currency") || doc_currency;
+                }
             });
-            if (doc_totals.length > 0 && extracted_total > 0) {
-                var max_doc = Math.max.apply(null, doc_totals);
-                var delta = Math.abs(extracted_total - max_doc);
-                var pct = ((delta / extracted_total) * 100).toFixed(2);
+            if (doc_totals.length === 0 || extracted_total <= 0) return;
+            var max_doc = Math.max.apply(null, doc_totals);
+
+            var renderDelta = function (extracted_in_doc_cur, note) {
+                var delta = Math.abs(extracted_in_doc_cur - max_doc);
+                var pct = ((delta / extracted_in_doc_cur) * 100).toFixed(2);
                 if (delta > 0.01) {
                     $delta.html(
                         '<span style="color:#c53030;">' +
-                        __("Delta") + ': ' + format_currency(delta, cmp_currency) + ' (' + pct + '%)' +
-                        '</span>'
+                        __("Delta") + ': ' + format_currency(delta, doc_currency) + ' (' + pct + '%)' +
+                        (note || '') + '</span>'
                     );
                 } else {
-                    $delta.html('<span style="color:#38a169;">' + __("Amounts match") + '</span>');
+                    $delta.html('<span style="color:#38a169;">' + __("Amounts match") +
+                        (note || '') + '</span>');
                 }
+            };
+
+            // Created docs are booked in the company currency. If that differs
+            // from the document's original currency, convert the extracted total
+            // with the exchange rate at the document date before comparing —
+            // otherwise the "delta" is just the FX difference, not a real mismatch.
+            if (doc_currency && review_currency && doc_currency !== review_currency) {
+                frappe.call({
+                    method: "erpnext.setup.utils.get_exchange_rate",
+                    args: {
+                        from_currency: review_currency,
+                        to_currency: doc_currency,
+                        transaction_date: consensus.document_date || frappe.datetime.get_today(),
+                        args: "for_buying",
+                    },
+                    callback: function (res) {
+                        var rate = parseFloat(res && res.message) || 0;
+                        if (rate > 0) {
+                            renderDelta(
+                                extracted_total * rate,
+                                ' <span class="text-muted">(' +
+                                __("converted from {0}", [review_currency]) + ')</span>'
+                            );
+                        } else {
+                            renderDelta(extracted_total);
+                        }
+                    },
+                });
+            } else {
+                renderDelta(extracted_total);
             }
         }, 1500);
     }

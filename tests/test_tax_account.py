@@ -272,6 +272,30 @@ class TestBuildTaxesRateAwareness:
         assert len(vat_rows) == 1
         assert vat_rows[0]["rate"] == 19.0
 
+    def test_shipping_and_surcharge_are_valuation_and_total(self):
+        """Bezugsnebenkosten (shipping + surcharge) must feed stock valuation."""
+        extracted_data = {
+            "items": [{"tax_rate": 19.0, "item_name": "Widget"}],
+            "shipping_cost": 10.0,
+            "surcharge_amount": 5.0,
+        }
+        settings = {"default_company": "Test GmbH"}
+
+        with patch(
+            "procurement_ai.chain_builder.purchase_order._get_shipping_account"
+        ) as mock_ship, patch(
+            "procurement_ai.chain_builder.purchase_order._get_tax_account"
+        ) as mock_tax:
+            mock_ship.return_value = "4730 - Bezugsnebenkosten"
+            mock_tax.return_value = "1576 - Vorsteuer 19%"
+
+            taxes = _build_taxes(extracted_data, settings)
+
+        actual_rows = [t for t in taxes if t.get("charge_type") == "Actual"]
+        assert len(actual_rows) == 2  # shipping + surcharge
+        for row in actual_rows:
+            assert row["category"] == "Valuation and Total"
+
 
 class TestGetDefaultExpenseAccount:
     """Test suite for _get_default_expense_account fallback chain."""
