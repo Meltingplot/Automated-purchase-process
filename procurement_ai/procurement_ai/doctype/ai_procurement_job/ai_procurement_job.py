@@ -137,7 +137,11 @@ class AIProcurementJob(Document):
 
         from ....chain_builder.retrospective import sanitize_extracted_data
         from ....chain_builder.supplier import ensure_supplier
-        from ....chain_builder.purchase_order import _resolve_item, _try_resolve_item
+        from ....chain_builder.purchase_order import (
+            _create_item,
+            _resolve_item,
+            _try_resolve_item,
+        )
 
         clean = sanitize_extracted_data(data)
         supplier = ensure_supplier(clean, forced_supplier=self.supplier_mapping or None)
@@ -153,6 +157,11 @@ class AIProcurementJob(Document):
         results = []
         for idx, item in enumerate(clean.get("items", [])):
             mapped_code = item_mapping.get(str(idx))
+            # A key present with a falsy value means the user explicitly cleared
+            # the mapping → force creation of a new Item (skip fuzzy matching),
+            # mirroring the user_cleared logic in purchase_order._build_items.
+            user_cleared = str(idx) in item_mapping and not mapped_code
+            stock_uom = stock_uom_mapping.get(str(idx))
             if mapped_code:
                 results.append({
                     "idx": idx,
@@ -167,9 +176,13 @@ class AIProcurementJob(Document):
                 })
                 continue
 
-            existing = _try_resolve_item(item, settings, supplier)
-            stock_uom = stock_uom_mapping.get(str(idx))
-            item_code = _resolve_item(item, settings, supplier, stock_uom=stock_uom)
+            if user_cleared:
+                item_code = _create_item(item, supplier, settings, stock_uom=stock_uom)
+                created = True
+            else:
+                existing = _try_resolve_item(item, settings, supplier)
+                item_code = _resolve_item(item, settings, supplier, stock_uom=stock_uom)
+                created = existing is None
 
             results.append({
                 "idx": idx,
@@ -180,7 +193,7 @@ class AIProcurementJob(Document):
                 "stock_uom": frappe.db.get_value(
                     "Item", item_code, "stock_uom",
                 ),
-                "created": existing is None,
+                "created": created,
             })
 
         frappe.db.commit()  # Persist newly created Items before returning to client  # nosemgrep
