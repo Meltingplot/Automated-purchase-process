@@ -694,10 +694,43 @@ def _verify_amounts(
     except (TypeError, ValueError):
         return False, None
 
+    extracted_currency = (consensus_data.get("currency") or "").strip()
+    posting_date = consensus_data.get("document_date") or frappe.utils.today()
+
     lines = []
-    lines.append(f"**Amount Verification** (extracted total: {extracted_total:.2f}, tolerance: {tolerance:.2f})")
+    cur_suffix = f" {extracted_currency}" if extracted_currency else ""
+    lines.append(
+        f"**Amount Verification** (extracted total: {extracted_total:.2f}{cur_suffix}, "
+        f"tolerance: {tolerance:.2f})"
+    )
 
     has_mismatch = False
+    _rate_cache: dict = {}
+
+    def _extracted_in(doc_currency: str) -> float:
+        """Extracted total expressed in the created document's currency.
+
+        Created docs are booked in the company base currency, which may differ
+        from the document's original currency. Convert with the exchange rate at
+        the document date (same rate the chain builder used), otherwise the diff
+        would just be the FX difference, not a real mismatch.
+        """
+        if not (extracted_currency and doc_currency) or extracted_currency == doc_currency:
+            return extracted_total
+        if doc_currency not in _rate_cache:
+            try:
+                from erpnext.setup.utils import get_exchange_rate
+
+                _rate_cache[doc_currency] = (
+                    get_exchange_rate(
+                        extracted_currency, doc_currency, posting_date, args="for_buying",
+                    )
+                    or 0
+                )
+            except Exception:  # noqa: BLE001 — rate lookup is best-effort
+                _rate_cache[doc_currency] = 0
+        rate = _rate_cache[doc_currency]
+        return round(extracted_total * rate, 2) if rate else extracted_total
 
     # All three docs have the same taxes (shipping + VAT) → compare grand_total
     for doctype, key in [
@@ -709,20 +742,26 @@ def _verify_amounts(
         if not doc_name:
             continue
 
-        grand_total = frappe.db.get_value(doctype, doc_name, "grand_total")
-        if grand_total is None:
+        doc = frappe.db.get_value(
+            doctype, doc_name, ["grand_total", "currency"], as_dict=True,
+        )
+        if not doc or doc.grand_total is None:
             continue
 
-        grand_total = float(grand_total)
-        diff = abs(grand_total - extracted_total)
-        pct = (diff / extracted_total * 100) if extracted_total else 0
+        grand_total = float(doc.grand_total)
+        doc_currency = (doc.currency or "").strip()
+        comparison_total = _extracted_in(doc_currency)
+        cur_label = f" {doc_currency}" if doc_currency else ""
+
+        diff = abs(grand_total - comparison_total)
+        pct = (diff / comparison_total * 100) if comparison_total else 0
 
         if diff <= tolerance:
-            lines.append(f"- {doctype} {doc_name}: {grand_total:.2f} ✓")
+            lines.append(f"- {doctype} {doc_name}: {grand_total:.2f}{cur_label} ✓")
         else:
             has_mismatch = True
             lines.append(
-                f"- {doctype} {doc_name}: {grand_total:.2f} "
+                f"- {doctype} {doc_name}: {grand_total:.2f}{cur_label} "
                 f"(diff: {diff:.2f}, {pct:.1f}%) ⚠"
             )
 
