@@ -89,6 +89,12 @@ class RetrospectiveChainBuilder:
         # Sanitize all LLM-sourced data before any DB interaction
         extracted_data = sanitize_extracted_data(extracted_data)
 
+        # Book everything in the company base currency: convert a foreign-currency
+        # document up-front (rate at document date) so the whole chain — and the
+        # matching below — runs in base currency. Happens only after approval,
+        # never in the review UI.
+        extracted_data = _convert_to_company_currency(extracted_data, settings)
+
         result: dict = {}
 
         # 1. Ensure supplier exists
@@ -240,6 +246,25 @@ class RetrospectiveChainBuilder:
                 job_name=job_name,
             )
             result["attachments"] = attachments
+
+        # Audit note on newly created docs when the chain was currency-converted
+        currency_note = extracted_data.get("_currency_note")
+        if currency_note and created_doc_keys:
+            import frappe
+
+            _DOCTYPE_BY_KEY = {
+                "purchase_order": "Purchase Order",
+                "purchase_receipt": "Purchase Receipt",
+                "purchase_invoice": "Purchase Invoice",
+            }
+            for key in created_doc_keys:
+                doctype = _DOCTYPE_BY_KEY.get(key)
+                if not doctype:
+                    continue
+                try:
+                    frappe.get_doc(doctype, result[key]).add_comment("Comment", currency_note)
+                except Exception:  # noqa: BLE001 — audit note is best-effort
+                    logger.warning(f"Could not add currency note to {result[key]}")
 
         matched_docs = [
             k for k in ("purchase_order", "purchase_receipt", "purchase_invoice")
@@ -435,6 +460,91 @@ def sanitize_extracted_data(data: dict) -> dict:
         clean["surcharge_amount"] = None
 
     return clean
+
+
+def _convert_to_company_currency(data: dict, settings: dict) -> dict:
+    """Convert all monetary amounts to the company base currency.
+
+    The system books everything in the company currency (no multi-currency
+    sub-ledgers). When a document is issued in a foreign currency, the amounts
+    are converted up-front using the exchange rate **at the document date**
+    (ERPNext's ``Currency Exchange`` interface), so every downstream document
+    (PO/PR/PI) is created in the base currency and booked against the standard
+    base-currency accounts — sidestepping ERPNext's party-account-currency
+    validation entirely (which otherwise rejects the *first* foreign-currency
+    invoice of a supplier that has no base-currency ledger history yet).
+
+    Runs at chain-build time (after the user approves), never in the review UI,
+    so the reviewer keeps comparing the original-currency amounts against the
+    source document.
+
+    Mutates and returns ``data``. When a conversion happens, records the
+    original currency/total, the applied rate, and a ready-made audit note
+    under ``_original_currency`` / ``_original_total`` / ``_conversion_rate`` /
+    ``_currency_note`` for a comment on the created documents.
+    """
+    import frappe
+    from frappe.utils import flt, today
+
+    currency = (data.get("currency") or "").strip()
+    if not currency:
+        return data
+
+    company = settings.get("default_company")
+    company_currency = (
+        frappe.get_cached_value("Company", company, "default_currency")
+        if company else None
+    )
+    if not company_currency or currency == company_currency:
+        return data  # already base currency — nothing to convert
+
+    posting_date = data.get("document_date") or today()
+
+    from erpnext.setup.utils import get_exchange_rate
+
+    rate = get_exchange_rate(currency, company_currency, posting_date, args="for_buying")
+    if not rate or flt(rate) <= 0:
+        frappe.throw(
+            f"No exchange rate {currency}→{company_currency} found for "
+            f"{posting_date}. Please add a Currency Exchange record for that date "
+            f"(Accounting → Currency Exchange) and re-run the job."
+        )
+    rate = flt(rate)
+
+    def _conv(value):
+        v = _clean_numeric(value)
+        return round(v * rate, 2) if v is not None else value
+
+    original_total = data.get("total_amount")
+
+    # Absolute monetary fields. Percentages (tax_rate, discount_percent) and
+    # confidence stay untouched — a rate applies to the converted net amount.
+    for field in (
+        "subtotal", "tax_amount", "total_amount",
+        "shipping_cost", "discount_amount", "surcharge_amount",
+    ):
+        if data.get(field) is not None:
+            data[field] = _conv(data[field])
+
+    for item in data.get("items", []):
+        for field in ("unit_price", "total_price"):
+            if item.get(field) is not None:
+                item[field] = _conv(item[field])
+
+    data["currency"] = company_currency
+    data["_original_currency"] = currency
+    data["_original_total"] = original_total
+    data["_conversion_rate"] = rate
+    data["_currency_note"] = (
+        f"Original document: {original_total} {currency} — converted to "
+        f"{company_currency} at exchange rate {rate} (document date {posting_date})."
+    )
+
+    logger.info(
+        f"Converted document {currency}→{company_currency} at rate {rate} "
+        f"(document date {posting_date})"
+    )
+    return data
 
 
 _SHIPPING_KEYWORDS = {
