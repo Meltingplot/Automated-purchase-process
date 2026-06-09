@@ -31,6 +31,10 @@ def _reset():
     frappe_mock.db.get_value.return_value = None
     frappe_mock.get_all.side_effect = None
     frappe_mock.get_all.return_value = []
+    # Company base currency matches the document currency (EUR), so
+    # _convert_to_company_currency takes the base-currency path (no conversion).
+    frappe_mock.get_cached_value.side_effect = None
+    frappe_mock.get_cached_value.return_value = "EUR"
 
 
 # ============================================================
@@ -256,3 +260,91 @@ class TestBuildChain:
         assert result["purchase_order"] == "EXISTING-PO"
         assert result["purchase_order_matched"] is True
         assert result["purchase_order_match_method"] == "po_name_exact"
+
+
+# ============================================================
+# Currency conversion (_convert_to_company_currency)
+# ============================================================
+
+# Fake erpnext.setup.utils so the lazy `get_exchange_rate` import resolves.
+_erpnext_mock = MagicMock()
+sys.modules.setdefault("erpnext", _erpnext_mock)
+sys.modules.setdefault("erpnext.setup", _erpnext_mock.setup)
+sys.modules.setdefault("erpnext.setup.utils", _erpnext_mock.setup.utils)
+
+
+class TestConvertToCompanyCurrency:
+    def setup_method(self):
+        _reset()
+        # Company books in EUR
+        frappe_mock.get_cached_value.return_value = "EUR"
+        self.get_rate = sys.modules["erpnext.setup.utils"].get_exchange_rate
+        self.get_rate.side_effect = None
+        frappe_mock.throw.side_effect = None
+
+    def _usd_data(self):
+        return {
+            "currency": "USD",
+            "document_date": "2025-03-25",
+            "items": [
+                {"item_name": "Widget", "quantity": 2,
+                 "unit_price": 100.0, "total_price": 200.0, "tax_rate": 19},
+            ],
+            "subtotal": 200.0,
+            "tax_amount": 0.0,
+            "total_amount": 200.0,
+            "shipping_cost": 50.0,
+            "discount_amount": None,
+            "surcharge_amount": None,
+        }
+
+    def test_base_currency_is_noop(self):
+        from procurement_ai.chain_builder.retrospective import (
+            _convert_to_company_currency,
+        )
+        data = {"currency": "EUR", "total_amount": 100.0,
+                "items": [{"unit_price": 50.0, "total_price": 100.0}]}
+        out = _convert_to_company_currency(data, SETTINGS)
+        assert out["currency"] == "EUR"
+        assert out["total_amount"] == 100.0
+        assert "_currency_note" not in out
+
+    def test_foreign_currency_converts_amounts(self):
+        from procurement_ai.chain_builder.retrospective import (
+            _convert_to_company_currency,
+        )
+        self.get_rate.return_value = 0.9
+        out = _convert_to_company_currency(self._usd_data(), SETTINGS)
+        assert out["currency"] == "EUR"
+        assert out["total_amount"] == 180.0       # 200 * 0.9
+        assert out["subtotal"] == 180.0
+        assert out["shipping_cost"] == 45.0       # 50 * 0.9
+        assert out["items"][0]["unit_price"] == 90.0    # 100 * 0.9
+        assert out["items"][0]["total_price"] == 180.0
+        # Percentages stay untouched
+        assert out["items"][0]["tax_rate"] == 19
+        # Audit metadata
+        assert out["_original_currency"] == "USD"
+        assert out["_original_total"] == 200.0
+        assert out["_conversion_rate"] == 0.9
+        assert "USD" in out["_currency_note"]
+
+    def test_rate_fetched_at_document_date(self):
+        from procurement_ai.chain_builder.retrospective import (
+            _convert_to_company_currency,
+        )
+        self.get_rate.return_value = 0.9
+        _convert_to_company_currency(self._usd_data(), SETTINGS)
+        args, kwargs = self.get_rate.call_args
+        assert args[0] == "USD"
+        assert args[1] == "EUR"
+        assert args[2] == "2025-03-25"   # document_date, not today()
+
+    def test_missing_rate_raises(self):
+        from procurement_ai.chain_builder.retrospective import (
+            _convert_to_company_currency,
+        )
+        self.get_rate.return_value = 0
+        frappe_mock.throw.side_effect = RuntimeError("no rate")
+        with pytest.raises(RuntimeError):
+            _convert_to_company_currency(self._usd_data(), SETTINGS)
