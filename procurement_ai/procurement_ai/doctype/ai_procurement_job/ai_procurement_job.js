@@ -155,13 +155,24 @@ var _SUPPLIER_FIELDS = [
     { key: "supplier_phone", label: "Supplier Phone", type: "text" },
 ];
 
+// Determines which documents get created (Invoice -> PO+PR+PI etc.),
+// so the reviewer must be able to correct a wrong classification.
+var _DOCUMENT_TYPE_OPTIONS = [
+    { value: "cart", label: "Cart" },
+    { value: "order_confirmation", label: "Order Confirmation" },
+    { value: "delivery_note", label: "Delivery Note" },
+    { value: "invoice", label: "Invoice" },
+];
+
 var _DOCUMENT_FIELDS = [
+    { key: "document_type", label: "Document Type", type: "select", options: _DOCUMENT_TYPE_OPTIONS },
     { key: "document_number", label: "Document Number", type: "text" },
     { key: "document_date", label: "Document Date", type: "date" },
     { key: "order_reference", label: "Order Reference", type: "text" },
     { key: "delivery_date", label: "Delivery Date", type: "date" },
     { key: "payment_terms", label: "Payment Terms", type: "text" },
     { key: "currency", label: "Currency", type: "link", link_doctype: "Currency" },
+    { key: "notes", label: "Notes", type: "text" },
 ];
 
 var _TOTALS_FIELDS = [
@@ -218,6 +229,17 @@ var _REVIEW_CSS = '<style>' +
     '.stock-detail.open { display: flex; align-items: center; gap: 4px; }' +
     '.stock-toggle { cursor: pointer; color: var(--text-muted); font-size: 0.8em; user-select: none; }' +
     '.stock-toggle:hover { color: var(--text-color); }' +
+    // Theme-aware colors (work in dark mode, fall back to light-theme values)
+    '.review-banner-warning { background: var(--bg-yellow, #fff3cd); border: 1px solid var(--yellow-300, #ffc107); color: var(--text-on-yellow, #856404); }' +
+    '.review-banner-warning pre { color: inherit; }' +
+    '.review-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.75em; }' +
+    '.review-badge-success { background: var(--bg-green, #38a169); color: var(--text-on-green, #fff); }' +
+    '.review-badge-info { background: var(--bg-blue, #3182ce); color: var(--text-on-blue, #fff); }' +
+    '.review-warning-text { color: var(--red-500, #c53030); }' +
+    '.review-success-text { color: var(--green-600, #38a169); }' +
+    '.item-delete { border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1em; line-height: 1; padding: 2px 6px; }' +
+    '.item-delete:hover { color: var(--red-500, #c53030); }' +
+    '.totals-check { text-align: right; font-size: 0.85em; margin-bottom: 8px; }' +
     '</style>';
 
 function _add_reject_button(frm) {
@@ -258,6 +280,25 @@ function _render_field_input(f, val, confidence_map) {
             ' data-initial-value="' + escaped + '"></div></div>';
     }
 
+    if (f.type === "select") {
+        var val_str = String(val === null || val === undefined ? "" : val);
+        var found = false;
+        var options_html = "";
+        (f.options || []).forEach(function (o) {
+            var sel = o.value === val_str ? " selected" : "";
+            if (sel) found = true;
+            options_html += '<option value="' + o.value + '"' + sel + '>' + __(o.label) + '</option>';
+        });
+        if (!found) {
+            // Keep an unexpected/empty extracted value visible instead of
+            // silently snapping to the first option.
+            options_html = '<option value="' + escaped + '" selected>' + escaped + '</option>' + options_html;
+        }
+        return '<div class="' + conf_class + '" style="margin-bottom:8px;">' + label_html +
+            '<select class="review-input review-field" data-field="' + f.key + '">' +
+            options_html + '</select></div>';
+    }
+
     var input_type = f.type === "number" ? "number" : f.type === "date" ? "date" : "text";
     var step_attr = f.type === "number" ? ' step="any"' : "";
     return '<div class="' + conf_class + '" style="margin-bottom:8px;">' + label_html +
@@ -282,10 +323,9 @@ function _render_review_ui(frm, options) {
     // Escalation banner
     if (options.escalation_reason) {
         html +=
-            '<div style="margin-bottom:16px;padding:12px 16px;border-radius:6px;' +
-            'background:#fff3cd;border:1px solid #ffc107;">' +
-            '<strong style="color:#856404;">' + __("Review Required") + '</strong>' +
-            '<pre style="margin:8px 0 0;white-space:pre-wrap;color:#856404;font-size:0.9em;">' +
+            '<div class="review-banner-warning" style="margin-bottom:16px;padding:12px 16px;border-radius:6px;">' +
+            '<strong>' + __("Review Required") + '</strong>' +
+            '<pre style="margin:8px 0 0;white-space:pre-wrap;background:transparent;font-size:0.9em;">' +
             frappe.utils.escape_html(options.escalation_reason) + '</pre></div>';
     }
 
@@ -325,93 +365,37 @@ function _render_review_ui(frm, options) {
     html += '<div class="review-card">';
     html += '<h6>' + __("Line Items") + '</h6>';
 
-    if (items.length > 0) {
-        html += '<div style="overflow-x:auto;">';
-        html += '<table class="items-table">';
-        html += '<thead><tr>';
-        html += '<th>#</th>';
-        _ITEM_FIELDS.forEach(function (f) {
-            html += '<th>' + __(f.label) + '</th>';
-        });
-        html += '<th>' + __("Qty") + '</th>';
-        html += '<th>' + __("Rate") + '</th>';
-        html += '<th>' + __("Total") + '</th>';
-        html += '<th>' + __("Map to Item") + '</th>';
-        html += '</tr></thead><tbody>';
+    html += '<div style="overflow-x:auto;">';
+    html += '<table class="items-table">';
+    html += '<thead><tr>';
+    html += '<th>#</th>';
+    _ITEM_FIELDS.forEach(function (f) {
+        html += '<th>' + __(f.label) + '</th>';
+    });
+    html += '<th>' + __("Qty") + '</th>';
+    html += '<th>' + __("Rate") + '</th>';
+    html += '<th>' + __("Tax %") + '</th>';
+    html += '<th>' + __("Type") + '</th>';
+    html += '<th>' + __("Total") + '</th>';
+    html += '<th>' + __("Map to Item") + '</th>';
+    html += '<th></th>';
+    html += '</tr></thead><tbody>';
 
-        items.forEach(function (item, idx) {
-            var qty = parseFloat(item["quantity"]) || 0;
-            var rate = parseFloat(item["unit_price"]) || 0;
-            var total = parseFloat(item["total_price"]) || (qty * rate);
-            var item_uom = item["uom"] || "Nos";
-
-            html += '<tr data-item-idx="' + idx + '">';
-            html += '<td>' + (idx + 1) + '</td>';
-
-            // Text fields (code, name, description)
-            _ITEM_FIELDS.forEach(function (f) {
-                var val = item[f.key];
-                if (val === null || val === undefined) val = "";
-                html +=
-                    '<td><input type="text" class="review-input review-item-field"' +
-                    ' data-idx="' + idx + '" data-field="' + f.key + '"' +
-                    ' value="' + frappe.utils.escape_html(String(val)) + '" /></td>';
-            });
-
-            // Qty column with toggle for stock detail
-            html +=
-                '<td class="qty-uom-cell" data-idx="' + idx + '"' +
-                ' data-line-total="' + total + '" data-invoice-qty="' + qty + '"' +
-                ' data-invoice-rate="' + rate + '" style="white-space:nowrap;">' +
-                '<div style="display:flex;align-items:center;gap:4px;">' +
-                '<input type="number" class="review-input doc-qty" data-idx="' + idx + '"' +
-                ' step="any" style="width:70px;" value="' + qty + '" />' +
-                '<span class="stock-toggle" data-idx="' + idx + '" title="' + __("Stock details") + '">&#9660;</span>' +
-                '</div>' +
-                // Collapsible stock detail row
-                '<div class="stock-detail" data-idx="' + idx + '">' +
-                '<span style="font-size:0.85em;color:var(--text-muted);">' + __("Stock") + ':&nbsp;</span>' +
-                '<input type="number" class="review-input stock-qty" data-idx="' + idx + '"' +
-                ' step="any" style="width:60px;" value="' + qty + '" />' +
-                '<div class="stock-uom-control" data-idx="' + idx + '"' +
-                ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"' +
-                ' style="display:inline-block;width:80px;"></div>' +
-                '<span class="qty-info" data-idx="' + idx + '"' +
-                ' style="font-size:0.8em;color:var(--text-muted);"></span>' +
-                '</div>' +
-                '<div class="qty-warning" data-idx="' + idx + '"' +
-                ' style="display:none;font-size:0.8em;color:#c53030;margin-top:2px;"></div>' +
-                '</td>';
-
-            // Rate (editable unit price; drives line total)
-            html +=
-                '<td><input type="number" class="review-input doc-rate" data-idx="' + idx + '"' +
-                ' step="any" style="width:90px;" value="' + _fmt_rate(rate) + '" /></td>';
-
-            // Total (bold, from extraction)
-            html +=
-                '<td><span class="line-total" data-idx="' + idx + '"' +
-                ' style="font-weight:600;">' +
-                format_currency(total, doc_currency) + '</span></td>';
-
-            // Map to Item
-            html +=
-                '<td>' +
-                '<div class="item-match-cell" data-idx="' + idx + '" style="margin-bottom:4px;">' +
-                '<span class="text-muted" style="font-size:0.8em;">' + __("Checking...") + '</span></div>' +
-                '<div class="item-link-control" data-idx="' + idx + '"></div>' +
-                '</td>';
-            html += '</tr>';
-        });
-        html += '</tbody></table></div>';
-    } else {
-        html += '<p class="text-muted">' + __("No line items extracted") + '</p>';
+    items.forEach(function (item, idx) {
+        html += _item_row_html(item, idx, doc_currency);
+    });
+    html += '</tbody></table></div>';
+    if (items.length === 0) {
+        html += '<p class="text-muted no-items-hint" style="margin-top:8px;">' + __("No line items extracted") + '</p>';
     }
+    html += '<button type="button" class="btn btn-xs btn-default add-item-row" style="margin-top:8px;">' +
+        '+ ' + __("Add Item") + '</button>';
     html += '</div>'; // end items card
 
     // Totals section (receipt-style, right-aligned)
     html += '<div class="review-card">';
     html += '<div class="review-totals">';
+    html += '<div class="totals-check"></div>';
     _TOTALS_FIELDS.forEach(function (f, i) {
         // Separator before total_amount
         if (f.key === "total_amount") {
@@ -472,44 +456,49 @@ function _render_review_ui(frm, options) {
     var wrapper = frm.fields_dict.review_html.$wrapper;
     wrapper.html(html);
 
-    // Stock detail toggle
-    wrapper.find(".stock-toggle").on("click", function () {
+    // Delegated events: survive dynamically added/removed rows and don't
+    // stack across re-renders (namespaced off() first).
+    wrapper.off(".reviewui");
+    wrapper.on("click.reviewui", ".stock-toggle", function () {
         var idx = $(this).data("idx");
         var $detail = wrapper.find('.stock-detail[data-idx="' + idx + '"]');
         $detail.toggleClass("open");
         $(this).html($detail.hasClass("open") ? "&#9650;" : "&#9660;");
     });
-
-    // Create Frappe Link controls for "Map to Item"
-    wrapper.find(".item-link-control").each(function () {
-        var $el = $(this);
-        var idx = $el.data("idx");
-        var control = frappe.ui.form.make_control({
-            df: {
-                fieldtype: "Link",
-                fieldname: "item_map_" + idx,
-                options: "Item",
-                placeholder: __("Auto-resolve"),
-                change: function () {
-                    frm.dirty();
-                    var item_code = control.get_value();
-                    if (item_code) {
-                        frappe.db.get_value("Item", item_code, "stock_uom", function (r) {
-                            if (r && r.stock_uom) {
-                                _set_stock_uom_readonly(wrapper, idx, r.stock_uom);
-                            }
-                        });
-                    } else {
-                        _set_stock_uom_editable(wrapper, idx);
-                    }
-                },
-            },
-            parent: $el,
-            render_input: true,
-        });
-        control.refresh();
-        $el.data("control", control);
+    wrapper.on("change.reviewui", ".doc-qty", function () {
+        frm.dirty();
+        _recalc_qty_cell(wrapper, $(this).data("idx"));
     });
+    wrapper.on("change.reviewui", ".stock-qty", function () {
+        frm.dirty();
+        _recalc_qty_cell(wrapper, $(this).data("idx"));
+    });
+    wrapper.on("change.reviewui", ".doc-rate", function () {
+        frm.dirty();
+        _on_rate_change(wrapper, $(this).data("idx"));
+    });
+    wrapper.on("change.reviewui", ".review-input", function () {
+        frm.dirty();
+    });
+    wrapper.on("change.reviewui", ".total-input", function () {
+        _update_totals_check(wrapper);
+    });
+    wrapper.on("click.reviewui", ".item-delete", function () {
+        $(this).closest("tr").remove();
+        frm.dirty();
+        _renumber_rows(wrapper);
+        _update_totals_check(wrapper);
+    });
+    wrapper.on("click.reviewui", ".add-item-row", function () {
+        _append_item_row(frm, wrapper);
+    });
+
+    // Track the next free row index for added rows (must not collide with
+    // rendered indices; collection reindexes by DOM order anyway).
+    wrapper.data("next_item_idx", items.length);
+
+    // Create Frappe Link controls (Map to Item + Stock UOM) for all rows
+    _wire_row_controls(frm, wrapper, wrapper);
 
     // Restore saved item_mapping values (so cleared mappings survive form reload)
     var saved_mapping = {};
@@ -583,83 +572,53 @@ function _render_review_ui(frm, options) {
         $el.data("control", control);
     });
 
-    // Create Frappe Link controls for Stock UOM fields
-    wrapper.find(".stock-uom-control").each(function () {
-        var $el = $(this);
-        var idx = $el.data("idx");
-        var initial_val = $el.data("initial-value") || "Nos";
-        var control = frappe.ui.form.make_control({
-            df: {
-                fieldtype: "Link",
-                fieldname: "stock_uom_" + idx,
-                options: "UOM",
-                placeholder: __("Stock UOM"),
-                change: function () {
-                    frm.dirty();
-                },
-            },
-            parent: $el,
-            render_input: true,
-        });
-        control.refresh();
-        control.set_value(initial_val);
-        $el.data("control", control);
-    });
+    // Initial plausibility line (items sum vs. totals)
+    _update_totals_check(wrapper);
 
-    // Quantity cell event handlers
-    wrapper.find(".doc-qty").on("change", function () {
-        frm.dirty();
-        var idx = $(this).data("idx");
-        _recalc_qty_cell(wrapper, idx);
-    });
-    wrapper.find(".stock-qty").on("change", function () {
-        frm.dirty();
-        var idx = $(this).data("idx");
-        _recalc_qty_cell(wrapper, idx);
-    });
-    wrapper.find(".doc-rate").on("change", function () {
-        frm.dirty();
-        var idx = $(this).data("idx");
-        _on_rate_change(wrapper, idx);
-    });
-
-    // Mark form dirty when any review input changes
-    wrapper.find(".review-input").on("change", function () {
-        frm.dirty();
-    });
-
-    // Async: check which supplier/items already exist
-    frm.call("check_review_matches").then(function (r) {
-        if (!r || !r.message) return;
-        var matches = r.message;
-        _render_match_badges(wrapper, matches, frm);
-    });
+    // Async: check which supplier/items already exist. On failure, replace
+    // the "Checking..." placeholders instead of leaving them stuck.
+    frm.call("check_review_matches").then(
+        function (r) {
+            if (!r || !r.message) {
+                _render_match_check_failed(wrapper);
+                return;
+            }
+            _render_match_badges(wrapper, r.message, frm);
+        },
+        function () {
+            _render_match_check_failed(wrapper);
+        }
+    );
 
     // Async: fetch grand totals for comparison panel
     if (options.show_comparison) {
         var review_currency = _review_currency(wrapper) || consensus.currency || null;
+        var fetches = [];
         wrapper.find(".comparison-doc-row").each(function () {
             var $row = $(this);
             var doctype = $row.data("doctype");
             var name = $row.data("name");
             // Fetch the doc's own currency too — created docs are booked in the
             // company base currency, which may differ from the extracted currency.
-            frappe.db.get_value(doctype, name, ["grand_total", "currency"], function (r) {
-                if (r && r.grand_total !== undefined && r.grand_total !== null) {
-                    // Store the raw numeric value for the delta calc — parsing the
-                    // formatted text breaks on locale separators (e.g. "456,45").
-                    var gt = parseFloat(r.grand_total) || 0;
-                    var doc_cur = r.currency || review_currency;
-                    $row.data("grand-total", gt);
-                    $row.data("doc-currency", doc_cur);
-                    $row.find(".doc-grand-total").text(
-                        "(" + __("Grand Total") + ": " + format_currency(gt, doc_cur) + ")"
-                    );
-                }
-            });
+            fetches.push(
+                frappe.db.get_value(doctype, name, ["grand_total", "currency"]).then(function (r) {
+                    var msg = r && r.message;
+                    if (msg && msg.grand_total !== undefined && msg.grand_total !== null) {
+                        // Store the raw numeric value for the delta calc — parsing the
+                        // formatted text breaks on locale separators (e.g. "456,45").
+                        var gt = parseFloat(msg.grand_total) || 0;
+                        var doc_cur = msg.currency || review_currency;
+                        $row.data("grand-total", gt);
+                        $row.data("doc-currency", doc_cur);
+                        $row.find(".doc-grand-total").text(
+                            "(" + __("Grand Total") + ": " + format_currency(gt, doc_cur) + ")"
+                        );
+                    }
+                })
+            );
         });
-        // Calculate delta after a short delay to let grand_totals load
-        setTimeout(function () {
+        // Calculate the delta once all grand totals are loaded (no timing race)
+        Promise.all(fetches).then(function () {
             var extracted_total = parseFloat(consensus.total_amount) || 0;
             var $delta = wrapper.find(".comparison-delta");
             var doc_totals = [];
@@ -679,12 +638,12 @@ function _render_review_ui(frm, options) {
                 var pct = ((delta / extracted_in_doc_cur) * 100).toFixed(2);
                 if (delta > 0.01) {
                     $delta.html(
-                        '<span style="color:#c53030;">' +
+                        '<span class="review-warning-text">' +
                         __("Delta") + ': ' + format_currency(delta, doc_currency) + ' (' + pct + '%)' +
                         (note || '') + '</span>'
                     );
                 } else {
-                    $delta.html('<span style="color:#38a169;">' + __("Amounts match") +
+                    $delta.html('<span class="review-success-text">' + __("Amounts match") +
                         (note || '') + '</span>');
                 }
             };
@@ -718,8 +677,255 @@ function _render_review_ui(frm, options) {
             } else {
                 renderDelta(extracted_total);
             }
-        }, 1500);
+        });
     }
+}
+
+// Render a single line-item row. Used for the initial table and for rows
+// added via the "Add Item" button. `idx` is the render index — collection
+// reindexes by DOM order, so gaps after deletions are harmless.
+function _item_row_html(item, idx, doc_currency) {
+    var qty = parseFloat(item["quantity"]) || 0;
+    var rate = parseFloat(item["unit_price"]) || 0;
+    var total = parseFloat(item["total_price"]) || (qty * rate);
+    var item_uom = item["uom"] || "Nos";
+    var tax_rate = item["tax_rate"];
+    var tax_val = tax_rate === null || tax_rate === undefined ? "" : tax_rate;
+    var item_type = item["item_type"] || "";
+
+    var html = '<tr data-item-idx="' + idx + '">';
+    html += '<td class="row-num">' + (idx + 1) + '</td>';
+
+    // Text fields (code, name, description)
+    _ITEM_FIELDS.forEach(function (f) {
+        var val = item[f.key];
+        if (val === null || val === undefined) val = "";
+        html +=
+            '<td><input type="text" class="review-input review-item-field"' +
+            ' data-idx="' + idx + '" data-field="' + f.key + '"' +
+            ' value="' + frappe.utils.escape_html(String(val)) + '" /></td>';
+    });
+
+    // Qty column with toggle for stock detail
+    html +=
+        '<td class="qty-uom-cell" data-idx="' + idx + '"' +
+        ' data-line-total="' + total + '" data-invoice-qty="' + qty + '"' +
+        ' data-invoice-rate="' + rate + '" style="white-space:nowrap;">' +
+        '<div style="display:flex;align-items:center;gap:4px;">' +
+        '<input type="number" class="review-input doc-qty" data-idx="' + idx + '"' +
+        ' step="any" style="width:70px;" value="' + qty + '" />' +
+        '<span class="stock-toggle" data-idx="' + idx + '" title="' + __("Stock details") + '">&#9660;</span>' +
+        '</div>' +
+        // Collapsible stock detail row
+        '<div class="stock-detail" data-idx="' + idx + '">' +
+        '<span style="font-size:0.85em;color:var(--text-muted);">' + __("Stock") + ':&nbsp;</span>' +
+        '<input type="number" class="review-input stock-qty" data-idx="' + idx + '"' +
+        ' step="any" style="width:60px;" value="' + qty + '" />' +
+        '<div class="stock-uom-control" data-idx="' + idx + '"' +
+        ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"' +
+        ' style="display:inline-block;width:80px;"></div>' +
+        '<span class="qty-info" data-idx="' + idx + '"' +
+        ' style="font-size:0.8em;color:var(--text-muted);"></span>' +
+        '</div>' +
+        '<div class="qty-warning review-warning-text" data-idx="' + idx + '"' +
+        ' style="display:none;font-size:0.8em;margin-top:2px;"></div>' +
+        '</td>';
+
+    // Rate (editable unit price; drives line total)
+    html +=
+        '<td><input type="number" class="review-input doc-rate" data-idx="' + idx + '"' +
+        ' step="any" style="width:90px;" value="' + _fmt_rate(rate) + '" /></td>';
+
+    // Tax rate (%) — feeds the Purchase Taxes and Charges rows
+    html +=
+        '<td><input type="number" class="review-input review-item-tax" data-idx="' + idx + '"' +
+        ' step="any" style="width:55px;" value="' + frappe.utils.escape_html(String(tax_val)) + '" /></td>';
+
+    // Item type (stock/service) — controls is_stock_item on new Items
+    html +=
+        '<td><select class="review-input review-item-type" data-idx="' + idx + '">' +
+        '<option value=""' + (item_type === "" ? " selected" : "") + '>' + __("Auto") + '</option>' +
+        '<option value="stock"' + (item_type === "stock" ? " selected" : "") + '>' + __("Stock") + '</option>' +
+        '<option value="service"' + (item_type === "service" ? " selected" : "") + '>' + __("Service") + '</option>' +
+        '</select></td>';
+
+    // Total (bold, from extraction)
+    html +=
+        '<td><span class="line-total" data-idx="' + idx + '"' +
+        ' style="font-weight:600;">' +
+        format_currency(total, doc_currency) + '</span></td>';
+
+    // Map to Item
+    html +=
+        '<td>' +
+        '<div class="item-match-cell" data-idx="' + idx + '" style="margin-bottom:4px;">' +
+        '<span class="text-muted" style="font-size:0.8em;">' + __("Checking...") + '</span></div>' +
+        '<div class="item-link-control" data-idx="' + idx + '"></div>' +
+        '</td>';
+
+    // Remove row
+    html +=
+        '<td><button type="button" class="item-delete" title="' + __("Remove line item") + '">&times;</button></td>';
+
+    html += '</tr>';
+    return html;
+}
+
+// Create the Frappe Link controls (Map to Item, Stock UOM) for all rows
+// inside $scope that don't have one yet. $scope is the whole wrapper on
+// initial render, or a single freshly added row.
+function _wire_row_controls(frm, wrapper, $scope) {
+    $scope.find(".item-link-control").each(function () {
+        var $el = $(this);
+        if ($el.data("control")) return;
+        var idx = $el.data("idx");
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "item_map_" + idx,
+                options: "Item",
+                placeholder: __("Auto-resolve"),
+                change: function () {
+                    frm.dirty();
+                    var item_code = control.get_value();
+                    if (item_code) {
+                        frappe.db.get_value("Item", item_code, "stock_uom", function (r) {
+                            if (r && r.stock_uom) {
+                                _set_stock_uom_readonly(wrapper, idx, r.stock_uom);
+                            }
+                        });
+                    } else {
+                        _set_stock_uom_editable(wrapper, idx);
+                    }
+                },
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        $el.data("control", control);
+    });
+
+    $scope.find(".stock-uom-control").each(function () {
+        var $el = $(this);
+        if ($el.data("control")) return;
+        var idx = $el.data("idx");
+        var initial_val = $el.data("initial-value") || "Nos";
+        var control = frappe.ui.form.make_control({
+            df: {
+                fieldtype: "Link",
+                fieldname: "stock_uom_" + idx,
+                options: "UOM",
+                placeholder: __("Stock UOM"),
+                change: function () {
+                    frm.dirty();
+                },
+            },
+            parent: $el,
+            render_input: true,
+        });
+        control.refresh();
+        control.set_value(initial_val);
+        $el.data("control", control);
+    });
+}
+
+// Append a blank line-item row (e.g. for a position the LLM missed entirely)
+function _append_item_row(frm, wrapper) {
+    var idx = wrapper.data("next_item_idx") || 0;
+    wrapper.data("next_item_idx", idx + 1);
+
+    var blank = {
+        item_code: "",
+        item_name: "",
+        description: "",
+        quantity: 1,
+        unit_price: 0,
+        total_price: 0,
+        uom: "Nos",
+    };
+    var $tbody = wrapper.find(".items-table tbody");
+    $tbody.append(_item_row_html(blank, idx, _review_currency(wrapper)));
+    wrapper.find(".no-items-hint").remove();
+
+    var $row = $tbody.find('tr[data-item-idx="' + idx + '"]');
+    _wire_row_controls(frm, wrapper, $row);
+    // A manually added row is always new until the user maps an existing Item
+    $row.find(".item-match-cell").html(
+        '<span class="review-badge review-badge-info">' + __("New") + '</span>'
+    );
+    _renumber_rows(wrapper);
+    _update_totals_check(wrapper);
+    frm.dirty();
+}
+
+// Keep the visible position numbers sequential after add/delete
+function _renumber_rows(wrapper) {
+    wrapper.find(".items-table tbody tr").each(function (i) {
+        $(this).find(".row-num").text(i + 1);
+    });
+}
+
+// Replace "Checking..." placeholders when the match check errors out
+function _render_match_check_failed(wrapper) {
+    var failed =
+        '<span class="text-muted" style="font-size:0.8em;">' +
+        __("Match check failed") + '</span>';
+    wrapper.find(".supplier-match-badge").html(failed);
+    wrapper.find(".item-match-cell").each(function () {
+        $(this).html(failed);
+    });
+}
+
+// Live plausibility line in the totals card: compare the sum of the line
+// items against Subtotal, and Subtotal + Tax + Shipping against Total.
+function _update_totals_check(wrapper) {
+    var $check = wrapper.find(".totals-check");
+    if (!$check.length) return;
+
+    var cur = _review_currency(wrapper);
+    var sum = 0;
+    wrapper.find(".qty-uom-cell").each(function () {
+        sum += parseFloat($(this).data("line-total")) || 0;
+    });
+
+    var read = function (key) {
+        var v = wrapper.find('.review-field[data-field="' + key + '"]').val();
+        return v === "" || v === undefined || v === null ? null : parseFloat(v);
+    };
+    var subtotal = read("subtotal");
+    var tax = read("tax_amount");
+    var shipping = read("shipping_cost");
+    var total = read("total_amount");
+
+    var parts = [
+        '<span class="text-muted">' + __("Items sum") + ': ' + format_currency(sum, cur) + '</span>',
+    ];
+    if (subtotal !== null) {
+        var d1 = sum - subtotal;
+        if (Math.abs(d1) > 0.01) {
+            parts.push(
+                '<span class="review-warning-text">' +
+                __("differs from Subtotal by {0}", [format_currency(d1, cur)]) + '</span>'
+            );
+        } else {
+            parts.push('<span class="review-success-text">' + __("matches Subtotal") + '</span>');
+        }
+    }
+    if (total !== null) {
+        var base = subtotal !== null ? subtotal : sum;
+        var net_total = base + (tax || 0) + (shipping || 0);
+        var net_ok = Math.abs(net_total - total) <= 0.02;
+        var gross_ok = Math.abs(base - total) <= 0.02;
+        if (!net_ok && !gross_ok) {
+            parts.push(
+                '<span class="review-warning-text">' +
+                __("Subtotal + Tax + Shipping differs from Total by {0}",
+                    [format_currency(net_total - total, cur)]) + '</span>'
+            );
+        }
+    }
+    $check.html(parts.join(" &middot; "));
 }
 
 function _render_match_badges(wrapper, matches, frm) {
@@ -740,20 +946,23 @@ function _render_match_badges(wrapper, matches, frm) {
                 '">' +
                 frappe.utils.escape_html(matches.supplier.name) +
                 "</a> " +
-                '<span class="badge badge-success" style="background:#38a169;color:#fff;">' +
+                '<span class="review-badge review-badge-success">' +
                 __("Exists") + " (" + matches.supplier.method + ")</span>"
         );
     } else {
         $supplier.html(
-            '<span class="badge badge-info" style="background:#3182ce;color:#fff;">' +
+            '<span class="review-badge review-badge-info">' +
                 __("New — will be created") +
                 "</span>"
         );
     }
 
-    // Item badges + UOM adjustments
+    // Item badges + UOM adjustments. Use the server-provided row index when
+    // available — sanitization can drop rows (shipping/discount), so the
+    // array position does not always equal the rendered row index.
     var items = matches.items || [];
-    items.forEach(function (info, idx) {
+    items.forEach(function (info, pos) {
+        var idx = info.idx !== undefined && info.idx !== null ? info.idx : pos;
         var $cell = wrapper.find('.item-match-cell[data-idx="' + idx + '"]');
 
         // Set resolved UOM on Stock UOM control
@@ -775,14 +984,14 @@ function _render_match_badges(wrapper, matches, frm) {
         if (user_cleared) {
             // User explicitly cleared this item — don't re-populate, show "New" badge
             $cell.html(
-                '<span class="badge" style="background:#3182ce;color:#fff;font-size:0.75em;">' +
+                '<span class="review-badge review-badge-info">' +
                     __("New") + "</span>"
             );
             _set_stock_uom_editable(wrapper, idx);
         } else if (user_mapped) {
             // User explicitly selected an item — keep their choice, show "Exists" badge
             $cell.html(
-                '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                '<span class="review-badge review-badge-success">' +
                     __("Exists") + "</span>"
             );
             if (info.stock_uom) {
@@ -793,7 +1002,7 @@ function _render_match_badges(wrapper, matches, frm) {
                 link_control.set_value(info.item_code);
             }
             $cell.html(
-                '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                '<span class="review-badge review-badge-success">' +
                     __("Exists") + "</span>"
             );
             if (info.stock_uom) {
@@ -801,7 +1010,7 @@ function _render_match_badges(wrapper, matches, frm) {
             }
         } else {
             $cell.html(
-                '<span class="badge" style="background:#3182ce;color:#fff;font-size:0.75em;">' +
+                '<span class="review-badge review-badge-info">' +
                     __("New") + "</span>"
             );
         }
@@ -875,9 +1084,12 @@ function _confidence_class(info) {
 
 function _collect_review_data(frm) {
     var wrapper = frm.fields_dict.review_html.$wrapper;
+    // Same base the UI was rendered from — otherwise edits saved in
+    // reviewed_data (e.g. on re-approve) would silently fall back to the
+    // original consensus values for fields kept outside the inputs.
     var consensus = {};
     try {
-        consensus = JSON.parse(frm.doc.consensus_data || "{}");
+        consensus = JSON.parse(frm.doc.reviewed_data || frm.doc.consensus_data || "{}");
     } catch (e) {
         consensus = {};
     }
@@ -910,59 +1122,58 @@ function _collect_review_data(frm) {
         }
     });
 
-    // Collect item fields (text inputs from _ITEM_FIELDS + compact quantity cell)
-    var items = consensus.items ? consensus.items.slice() : [];
-    wrapper.find(".review-item-field").each(function () {
-        var $input = $(this);
-        var idx = parseInt($input.data("idx"), 10);
-        var field_key = $input.data("field");
-        if (!items[idx]) items[idx] = {};
-        items[idx][field_key] = $input.val();
-    });
+    // Collect items row by row in DOM order. Rows can be deleted or added in
+    // the UI, so the result is reindexed sequentially — item_mapping and
+    // stock_uom_mapping use the same fresh indices.
+    var base_items = consensus.items || [];
+    var items = [];
+    var item_mapping = {};
+    var stock_uom_mapping = {};
 
-    // Collect compact quantity/UOM data from each qty-uom-cell
-    wrapper.find(".qty-uom-cell").each(function () {
-        var $cell = $(this);
-        var idx = parseInt($cell.data("idx"), 10);
-        if (!items[idx]) items[idx] = {};
+    wrapper.find(".items-table tbody tr[data-item-idx]").each(function () {
+        var $row = $(this);
+        var orig_idx = parseInt($row.attr("data-item-idx"), 10);
+        // Base: the rendered source item (preserves fields without inputs);
+        // rows added in the UI have no base and start empty.
+        var item = Object.assign({}, base_items[orig_idx] || {});
 
-        var doc_qty = parseFloat($cell.find('.doc-qty').val()) || 0;
-        var stock_qty_val = parseFloat($cell.find('.stock-qty').val()) || 0;
+        // Text fields (code, name, description)
+        $row.find(".review-item-field").each(function () {
+            item[$(this).data("field")] = $(this).val();
+        });
+
+        // Tax rate (%): empty input means "not extracted" (null)
+        var tax_val = $row.find(".review-item-tax").val();
+        item.tax_rate = tax_val === "" || tax_val === undefined ? null : parseFloat(tax_val);
+
+        // Item type: "" means auto-classification (null)
+        item.item_type = $row.find(".review-item-type").val() || null;
+
+        // Compact quantity/UOM cell
+        var $cell = $row.find(".qty-uom-cell");
+        var doc_qty = parseFloat($cell.find(".doc-qty").val()) || 0;
+        var stock_qty_val = parseFloat($cell.find(".stock-qty").val()) || 0;
         var line_total = parseFloat($cell.data("line-total")) || 0;
-        var $stock_uom_el = $cell.find('.stock-uom-control');
-        var stock_uom_ctrl = $stock_uom_el.data("control");
+        var stock_uom_ctrl = $row.find(".stock-uom-control").data("control");
         var resolved_uom = stock_uom_ctrl ? (stock_uom_ctrl.get_value() || "Nos") : "Nos";
 
         var factor = doc_qty > 0 ? stock_qty_val / doc_qty : 1;
         var is_bulk = factor > 1 && Number.isInteger(factor);
 
-        items[idx].quantity = doc_qty;
-        items[idx].unit_price = doc_qty > 0 ? line_total / doc_qty : 0;
-        items[idx].total_price = line_total;
-        items[idx].uom = is_bulk ? String(Math.round(factor)) : resolved_uom;
+        item.quantity = doc_qty;
+        item.unit_price = doc_qty > 0 ? line_total / doc_qty : 0;
+        item.total_price = line_total;
+        item.uom = is_bulk ? String(Math.round(factor)) : resolved_uom;
+
+        var new_idx = items.length;
+        items.push(item);
+
+        var link_ctrl = $row.find(".item-link-control").data("control");
+        item_mapping[new_idx] = link_ctrl ? (link_ctrl.get_value() || null) : null;
+        stock_uom_mapping[new_idx] = stock_uom_ctrl ? (stock_uom_ctrl.get_value() || null) : null;
     });
 
     reviewed.items = items;
-
-    // Collect item mapping
-    var item_mapping = {};
-    wrapper.find(".item-link-control").each(function () {
-        var $el = $(this);
-        var idx = $el.data("idx");
-        var control = $el.data("control");
-        var val = control ? control.get_value() : null;
-        item_mapping[idx] = val || null;
-    });
-
-    // Collect stock UOM mapping (for new item creation)
-    var stock_uom_mapping = {};
-    wrapper.find(".stock-uom-control").each(function () {
-        var $el = $(this);
-        var idx = $el.data("idx");
-        var control = $el.data("control");
-        var val = control ? control.get_value() : null;
-        stock_uom_mapping[idx] = val || null;
-    });
 
     // Collect assigned supplier (overrides fuzzy matching when set)
     var supplier_mapping = "";
@@ -991,15 +1202,69 @@ function _save_review_data(frm, data) {
 }
 
 function _collect_and_approve(frm) {
+    if (frm._approve_in_flight) return;
+
     var data = _collect_review_data(frm);
+
+    // Validate before sending: empty dates block approval (the chain needs
+    // them for posting dates and exchange rates), with a clear message
+    // naming the affected fields instead of a generic server error.
+    var missing_dates = [];
+    _DOCUMENT_FIELDS.forEach(function (f) {
+        if (f.type === "date" && !data.reviewed[f.key]) {
+            missing_dates.push(__(f.label));
+        }
+    });
+    var unnamed_rows = [];
+    (data.reviewed.items || []).forEach(function (item, i) {
+        if (!String(item.item_name || "").trim()) {
+            unnamed_rows.push(i + 1);
+        }
+    });
+    var no_items = !(data.reviewed.items || []).length;
+    if (missing_dates.length || unnamed_rows.length || no_items) {
+        var msg = "";
+        if (missing_dates.length) {
+            msg += __("Please fill in the following date field(s) before approving:") +
+                "<br><b>" + missing_dates.join(", ") + "</b>";
+        }
+        if (unnamed_rows.length) {
+            msg += (msg ? "<br><br>" : "") +
+                __("Line item row(s) {0} have no item name.", [unnamed_rows.join(", ")]);
+        }
+        if (no_items) {
+            msg += (msg ? "<br><br>" : "") +
+                __("At least one line item is required.");
+        }
+        frappe.msgprint({
+            title: __("Cannot approve yet"),
+            message: msg,
+            indicator: "red",
+        });
+        return;
+    }
+
+    // Guard against double-clicks: a second submit would enqueue the
+    // chain builder twice before the status flips to Processing.
+    frm._approve_in_flight = true;
+    frappe.dom.freeze(__("Creating documents..."));
+
     frm.call("approve_and_create", {
         reviewed_data: JSON.stringify(data.reviewed),
         item_mapping: JSON.stringify(data.item_mapping),
         stock_uom_mapping: JSON.stringify(data.stock_uom_mapping),
         supplier_mapping: data.supplier_mapping || "",
-    }).then(function () {
-        frm.reload_doc();
-    });
+    }).then(
+        function () {
+            frappe.dom.unfreeze();
+            frm._approve_in_flight = false;
+            frm.reload_doc();
+        },
+        function () {
+            frappe.dom.unfreeze();
+            frm._approve_in_flight = false;
+        }
+    );
 }
 
 function _precreate_items(frm) {
@@ -1026,12 +1291,12 @@ function _precreate_items(frm) {
                 if (item.created) {
                     created_count++;
                     $cell.html(
-                        '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                        '<span class="review-badge review-badge-success">' +
                             __("Created") + "</span>"
                     );
                 } else {
                     $cell.html(
-                        '<span class="badge" style="background:#38a169;color:#fff;font-size:0.75em;">' +
+                        '<span class="review-badge review-badge-success">' +
                             __("Exists") + "</span>"
                     );
                 }
@@ -1160,10 +1425,11 @@ function _refresh_currency_display(wrapper) {
     wrapper.find(".qty-uom-cell").each(function () {
         var idx = $(this).data("idx");
         var line_total = parseFloat($(this).data("line-total")) || 0;
-        wrapper.find('.line-total[data-idx="' + idx + '"]').html(
-            "=&thinsp;<strong>" + format_currency(line_total, currency) + "</strong>"
+        wrapper.find('.line-total[data-idx="' + idx + '"]').text(
+            format_currency(line_total, currency)
         );
     });
+    _update_totals_check(wrapper);
 }
 
 // User edited the unit price directly: line total = rate × doc qty.
@@ -1179,11 +1445,12 @@ function _on_rate_change(wrapper, idx) {
 
     $cell.data("line-total", line_total);
 
-    wrapper.find('.line-total[data-idx="' + idx + '"]').html(
-        "=&thinsp;<strong>" + format_currency(line_total, _review_currency(wrapper)) + "</strong>"
+    wrapper.find('.line-total[data-idx="' + idx + '"]').text(
+        format_currency(line_total, _review_currency(wrapper))
     );
 
     _validate_rate(wrapper, idx, rate, line_total, doc_qty);
+    _update_totals_check(wrapper);
 }
 
 function _recalc_qty_cell(wrapper, idx) {
@@ -1203,8 +1470,8 @@ function _recalc_qty_cell(wrapper, idx) {
     wrapper.find('.doc-rate[data-idx="' + idx + '"]').val(_fmt_rate(rate));
 
     // Update total
-    wrapper.find('.line-total[data-idx="' + idx + '"]').html(
-        "=&thinsp;<strong>" + format_currency(line_total, _review_currency(wrapper)) + "</strong>"
+    wrapper.find('.line-total[data-idx="' + idx + '"]').text(
+        format_currency(line_total, _review_currency(wrapper))
     );
 
     // Update factor info
@@ -1217,6 +1484,7 @@ function _recalc_qty_cell(wrapper, idx) {
 
     // Sub-cent validation
     _validate_rate(wrapper, idx, rate, line_total, doc_qty);
+    _update_totals_check(wrapper);
 }
 
 function _validate_rate(wrapper, idx, rate, total, current_left) {
@@ -1236,12 +1504,13 @@ function _validate_rate(wrapper, idx, rate, total, current_left) {
         $warning.hide();
         return;
     }
+    var currency = _review_currency(wrapper);
     var msg = __("Sub-cent rate") + ". " + __("Try") + ": " +
         suggestions.map(function (s) {
-            return s + " (" + format_currency(total / s) + ")";
+            return s + " (" + format_currency(total / s, currency) + ")";
         }).join(", ");
     $warning.text(msg).show();
-    $doc_qty.css("border-color", "#c53030");
+    $doc_qty.css("border-color", "var(--red-500, #c53030)");
 }
 
 function _has_cent_fractions_js(rate) {

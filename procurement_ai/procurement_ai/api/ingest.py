@@ -425,7 +425,11 @@ def run_chain_from_review(procurement_job_name: str):
         # User-assigned supplier (overrides fuzzy matching when set)
         supplier_mapping = job.supplier_mapping or None
 
-        source_type = job.detected_type or "Invoice"
+        # Prefer the reviewer-corrected document_type (from the review UI's
+        # Document Type select) over the original classification.
+        source_type = _resolve_detected_type(
+            job.detected_type or "Invoice", consensus_data,
+        ) or "Invoice"
         source_file_url = job.source_document_url or job.source_document
 
         from ...chain_builder.retrospective import RetrospectiveChainBuilder

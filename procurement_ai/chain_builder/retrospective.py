@@ -420,10 +420,16 @@ def sanitize_extracted_data(data: dict) -> dict:
         data.get("confidence_self_assessment")
     )
 
-    # Line items
+    # Line items. Stamp each with its original index so user-provided
+    # mappings (item_mapping / stock_uom_mapping, keyed by review-UI row
+    # index) stay aligned even after shipping/discount/surcharge rows are
+    # removed below.
     raw_items = data.get("items", [])
     if isinstance(raw_items, list):
-        clean["items"] = [_sanitize_line_item(item) for item in raw_items]
+        clean["items"] = [
+            {**_sanitize_line_item(item), "_orig_idx": i}
+            for i, item in enumerate(raw_items)
+        ]
     else:
         clean["items"] = []
 

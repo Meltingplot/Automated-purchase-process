@@ -76,9 +76,19 @@ class AIProcurementJob(Document):
             try:
                 ExtractedDocument.model_validate(data)
             except PydanticValidationError as e:
+                problems = []
+                for err in e.errors():
+                    loc = " → ".join(str(p) for p in err.get("loc", ())) or _("document")
+                    problems.append(
+                        "<li><b>{0}</b>: {1}</li>".format(
+                            frappe.utils.escape_html(loc),
+                            frappe.utils.escape_html(err.get("msg", "")),
+                        )
+                    )
                 frappe.throw(
-                    _("Reviewed data failed validation: {0} error(s). "
-                      "Please correct the data and try again.").format(e.error_count()),
+                    _("The reviewed data is incomplete or invalid:")
+                    + "<ul>{0}</ul>".format("".join(problems))
+                    + _("Please correct these fields in the review form and try again."),
                     title=_("Validation Error"),
                 )
 
@@ -156,15 +166,19 @@ class AIProcurementJob(Document):
 
         results = []
         for idx, item in enumerate(clean.get("items", [])):
-            mapped_code = item_mapping.get(str(idx))
+            # Mappings + UI rows are keyed by the review-UI row index;
+            # sanitization may have removed rows (shipping/discount), so use
+            # the original index stamped by sanitize_extracted_data.
+            ui_idx = item.get("_orig_idx", idx)
+            mapped_code = item_mapping.get(str(ui_idx))
             # A key present with a falsy value means the user explicitly cleared
             # the mapping → force creation of a new Item (skip fuzzy matching),
             # mirroring the user_cleared logic in purchase_order._build_items.
-            user_cleared = str(idx) in item_mapping and not mapped_code
-            stock_uom = stock_uom_mapping.get(str(idx))
+            user_cleared = str(ui_idx) in item_mapping and not mapped_code
+            stock_uom = stock_uom_mapping.get(str(ui_idx))
             if mapped_code:
                 results.append({
-                    "idx": idx,
+                    "idx": ui_idx,
                     "item_code": mapped_code,
                     "item_name": frappe.db.get_value(
                         "Item", mapped_code, "item_name",
@@ -185,7 +199,7 @@ class AIProcurementJob(Document):
                 created = existing is None
 
             results.append({
-                "idx": idx,
+                "idx": ui_idx,
                 "item_code": item_code,
                 "item_name": frappe.db.get_value(
                     "Item", item_code, "item_name",
@@ -219,7 +233,9 @@ class AIProcurementJob(Document):
         Returns dict with supplier match info and per-item match info,
         used by the review UI to show "exists" / "will create" badges.
         """
-        consensus = json.loads(self.consensus_data or "{}")
+        # Use reviewed data when present so badges/indices match the rendered
+        # review UI (rows may have been edited, added or deleted by the user).
+        consensus = json.loads(self.reviewed_data or self.consensus_data or "{}")
         if not consensus:
             return {"supplier": None, "items": []}
 
@@ -267,13 +283,16 @@ class AIProcurementJob(Document):
         invoice_currency = clean.get("currency")
 
         items_info = []
-        for item in clean.get("items", []):
+        for pos, item in enumerate(clean.get("items", [])):
             matched = _try_resolve_item(item, settings, supplier_name)
             qty = float(item.get("quantity", 1) or 1)
             rate = _true_unit_price(item, qty)
             uom = _resolve_uom(item.get("uom", "Nos"))
 
             info = {
+                # Review-UI row index — sanitization may have removed rows
+                # (shipping/discount), so position and UI index can differ.
+                "idx": item.get("_orig_idx", pos),
                 "item_code": matched if matched else None,
                 "exists": bool(matched),
                 "resolved_uom": uom,
