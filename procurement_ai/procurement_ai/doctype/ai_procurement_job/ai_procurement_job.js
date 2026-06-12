@@ -223,7 +223,7 @@ var _REVIEW_CSS = '<style>' +
     '.comparison-panel h6 { margin: 0 0 12px; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }' +
     // Fixed layout: name/description share the flexible space, numeric
     // columns stay narrow, inputs fill their cell. Wrapper scrolls if needed.
-    '.items-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 1080px; }' +
+    '.items-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 960px; }' +
     '.items-table th { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-muted); padding: 6px; border-bottom: 2px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }' +
     '.items-table td { padding: 6px; border-bottom: 1px solid var(--border-color); vertical-align: top; }' +
     '.items-table .review-input { padding: 2px 4px; }' +
@@ -236,6 +236,11 @@ var _REVIEW_CSS = '<style>' +
     '.stock-detail.open { display: block; }' +
     '.stock-detail .review-input, .stock-detail .stock-uom-control { display: block; width: 100% !important; margin-top: 2px; }' +
     '.uom-new-hint { display: none; margin-top: 2px; font-size: 0.75em; color: #d69e2e; }' +
+    // Link-control dropdowns (awesomplete) in the table: anchor to the right
+    // edge of their column and open leftwards over the table, so the list is
+    // not clipped by the scrolling table wrapper.
+    '.items-table .awesomplete > ul { z-index: 100; }' +
+    '.items-table .item-link-control .awesomplete > ul { left: auto !important; right: 0 !important; width: 320px; max-width: 60vw; }' +
     // Theme-aware colors (work in dark mode, fall back to light-theme values)
     '.review-banner-warning { background: var(--bg-yellow, #fff3cd); border: 1px solid var(--yellow-300, #ffc107); color: var(--text-on-yellow, #856404); }' +
     '.review-banner-warning pre { color: inherit; }' +
@@ -376,17 +381,17 @@ function _render_review_ui(frm, options) {
     html += '<table class="items-table">';
     // Column widths (fixed layout): name + description share the remainder
     html += '<colgroup>' +
-        '<col style="width:30px;">' +   // #
-        '<col style="width:110px;">' +  // supplier code
+        '<col style="width:28px;">' +   // #
+        '<col style="width:100px;">' +  // supplier code
         '<col>' +                        // item name (flex)
         '<col>' +                        // description (flex)
-        '<col style="width:110px;">' +  // qty + stock summary
-        '<col style="width:85px;">' +   // rate
-        '<col style="width:55px;">' +   // tax %
-        '<col style="width:85px;">' +   // type
-        '<col style="width:90px;">' +   // total
-        '<col style="width:150px;">' +  // map to item
-        '<col style="width:30px;">' +   // delete
+        '<col style="width:100px;">' +  // qty + stock summary
+        '<col style="width:78px;">' +   // rate
+        '<col style="width:50px;">' +   // tax %
+        '<col style="width:78px;">' +   // type
+        '<col style="width:85px;">' +   // total
+        '<col style="width:140px;">' +  // map to item
+        '<col style="width:28px;">' +   // delete
         '</colgroup>';
     html += '<thead><tr>';
     html += '<th>#</th>';
