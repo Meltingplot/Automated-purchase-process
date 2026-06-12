@@ -726,7 +726,7 @@ function _item_row_html(item, idx, doc_currency) {
     var qty = parseFloat(item["quantity"]) || 0;
     var rate = parseFloat(item["unit_price"]) || 0;
     var total = parseFloat(item["total_price"]) || (qty * rate);
-    var item_uom = item["uom"] || "Nos";
+    var item_uom = item["uom"] || "";
     var tax_rate = item["tax_rate"];
     var tax_val = tax_rate === null || tax_rate === undefined ? "" : tax_rate;
     var item_type = item["item_type"] || "";
@@ -869,7 +869,7 @@ function _wire_row_controls(frm, wrapper, $scope) {
         var $el = $(this);
         if ($el.data("control")) return;
         var idx = $el.data("idx");
-        var initial_val = $el.data("initial-value") || "Nos";
+        var initial_val = $el.data("initial-value") || "";
         var control = frappe.ui.form.make_control({
             df: {
                 fieldtype: "Link",
@@ -902,7 +902,7 @@ function _append_item_row(frm, wrapper) {
         quantity: 1,
         unit_price: 0,
         total_price: 0,
-        uom: "Nos",
+        uom: "",
     };
     var $tbody = wrapper.find(".items-table tbody");
     $tbody.append(_item_row_html(blank, idx, _review_currency(wrapper)));
@@ -1224,7 +1224,7 @@ function _collect_review_data(frm) {
         var stock_qty_val = parseFloat($cell.find(".stock-qty").val()) || 0;
         var line_total = parseFloat($cell.data("line-total")) || 0;
         var stock_uom_ctrl = $row.find(".stock-uom-control").data("control");
-        var resolved_uom = stock_uom_ctrl ? (stock_uom_ctrl.get_value() || "Nos") : "Nos";
+        var resolved_uom = stock_uom_ctrl ? (stock_uom_ctrl.get_value() || "") : "";
 
         var factor = doc_qty > 0 ? stock_qty_val / doc_qty : 1;
         var is_bulk = factor > 1 && Number.isInteger(factor);
@@ -1448,12 +1448,23 @@ function _render_created_docs_dashboard(frm) {
 function _set_stock_uom_readonly(wrapper, idx, stock_uom) {
     var $el = wrapper.find('.stock-uom-control[data-idx="' + idx + '"]');
     var control = $el.data("control");
-    if (control) {
-        control.set_value(stock_uom);
-        control.$input.prop("disabled", true);
-        control.$input.css("background", "var(--subtle-fg)");
-        _update_stock_summary(wrapper, idx);
+    if (!control) return;
+    if (!stock_uom) {
+        // No known unit — leave the control editable instead of locking
+        // an empty field.
+        _set_stock_uom_editable(wrapper, idx);
+        return;
     }
+    control.set_value(stock_uom);
+    // Make the locked value visible even if set_value resolves async
+    control.$input.val(stock_uom);
+    control.$input.prop("disabled", true);
+    control.$input.attr(
+        "title",
+        __("Stock unit of the existing Item — change it on the Item itself or map to a different Item")
+    );
+    control.$input.css("background", "var(--subtle-fg)");
+    _update_stock_summary(wrapper, idx);
 }
 
 function _set_stock_uom_editable(wrapper, idx) {
