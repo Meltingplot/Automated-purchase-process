@@ -1448,12 +1448,23 @@ function _render_created_docs_dashboard(frm) {
 function _set_stock_uom_readonly(wrapper, idx, stock_uom) {
     var $el = wrapper.find('.stock-uom-control[data-idx="' + idx + '"]');
     var control = $el.data("control");
-    if (control) {
-        control.set_value(stock_uom);
-        control.$input.prop("disabled", true);
-        control.$input.css("background", "var(--subtle-fg)");
-        _update_stock_summary(wrapper, idx);
+    if (!control) return;
+    if (!stock_uom) {
+        // No known unit — leave the control editable instead of locking
+        // an empty field.
+        _set_stock_uom_editable(wrapper, idx);
+        return;
     }
+    control.set_value(stock_uom);
+    // Make the locked value visible even if set_value resolves async
+    control.$input.val(stock_uom);
+    control.$input.prop("disabled", true);
+    control.$input.attr(
+        "title",
+        __("Stock unit of the existing Item — change it on the Item itself or map to a different Item")
+    );
+    control.$input.css("background", "var(--subtle-fg)");
+    _update_stock_summary(wrapper, idx);
 }
 
 function _set_stock_uom_editable(wrapper, idx) {
