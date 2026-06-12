@@ -258,6 +258,7 @@ var _REVIEW_CSS = '<style>' +
     '.item-delete { border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1em; line-height: 1; padding: 2px 6px; }' +
     '.item-delete:hover { color: var(--red-500, #c53030); }' +
     '.totals-check { text-align: right; font-size: 0.85em; margin-bottom: 8px; }' +
+    '.gross-net-notice { text-align: right; font-size: 0.8em; color: #d69e2e; margin-bottom: 8px; }' +
     '</style>';
 
 function _add_reject_button(frm) {
@@ -516,6 +517,19 @@ function _render_review_ui(frm, options) {
     wrapper.on("change.reviewui", ".review-input", function () {
         frm.dirty();
     });
+    // Editing the Shipping Cost field updates a single linked shipping row
+    wrapper.on("change.reviewui", '.review-field[data-field="shipping_cost"]', function () {
+        var rows = _get_shipping_rows(wrapper);
+        if (rows.length !== 1) return;
+        var val = parseFloat($(this).val()) || 0;
+        rows[0].$cell.data("line-total", val);
+        _recalc_qty_cell(wrapper, rows[0].$cell.data("idx"));
+        _update_totals_check(wrapper);
+    });
+    // Renaming an item can turn it into / out of a shipping row
+    wrapper.on("change.reviewui", '.review-item-field[data-field="item_name"]', function () {
+        _update_totals_check(wrapper);
+    });
     wrapper.on("change.reviewui", ".total-input", function () {
         _update_totals_check(wrapper);
     });
@@ -609,6 +623,9 @@ function _render_review_ui(frm, options) {
         }
         $el.data("control", control);
     });
+
+    // Convert gross-priced rows to net before the first plausibility check
+    _maybe_convert_gross_rows(wrapper);
 
     // Initial plausibility line (items sum vs. totals)
     _update_totals_check(wrapper);
@@ -939,6 +956,106 @@ function _render_match_check_failed(wrapper) {
 
 // Live plausibility line in the totals card: compare the sum of the line
 // items against Subtotal, and Subtotal + Tax + Shipping against Total.
+// Shipping line items (mirrors _SHIPPING_KEYWORDS in retrospective.py)
+var _SHIPPING_ROW_KEYWORDS = [
+    "versand", "shipping", "freight", "fracht", "transport", "porto",
+    "lieferkosten", "delivery cost", "postage", "spedition",
+    "paketversand", "logistik", "dhl", "dpd", "ups", "fedex", "hermes",
+    "gls", "tnt", "paket deutschland", "paketdienst",
+];
+
+function _is_shipping_row_name(name) {
+    name = (name || "").toLowerCase();
+    return _SHIPPING_ROW_KEYWORDS.some(function (kw) {
+        return name.indexOf(kw) !== -1;
+    });
+}
+
+// All item rows whose name marks them as shipping costs
+function _get_shipping_rows(wrapper) {
+    var rows = [];
+    wrapper.find(".items-table tbody tr.item-main-row").each(function () {
+        var $row = $(this);
+        var name = $row.add($row.next("tr.item-text-row"))
+            .find('.review-item-field[data-field="item_name"]').val();
+        if (_is_shipping_row_name(name)) {
+            rows.push({
+                $row: $row,
+                $cell: $row.find(".qty-uom-cell"),
+                total: parseFloat($row.find(".qty-uom-cell").data("line-total")) || 0,
+            });
+        }
+    });
+    return rows;
+}
+
+// Keep the Shipping Cost totals field in sync with shipping item rows.
+// Returns true when shipping is carried by item rows (then it must not be
+// added on top of the subtotal again).
+function _sync_shipping_rows_to_field(wrapper) {
+    var rows = _get_shipping_rows(wrapper);
+    var $field = wrapper.find('.review-field[data-field="shipping_cost"]');
+    var $ship_label = $field.closest(".total-row").find("label");
+    var $sub_label = wrapper.find('.review-field[data-field="subtotal"]')
+        .closest(".total-row").find("label");
+
+    if (!rows.length) {
+        $ship_label.text(__("Shipping Cost") + ":");
+        $sub_label.text(__("Subtotal") + ":");
+        $field.prop("readonly", false).removeAttr("title");
+        return false;
+    }
+
+    var sum = 0;
+    rows.forEach(function (r) { sum += r.total; });
+    $field.val(Math.round(sum * 100) / 100);
+    $ship_label.text(__("Shipping Cost") + " (" + __("from item row") + "):");
+    $sub_label.text(__("Subtotal") + " (" + __("incl. shipping") + "):");
+    $field.attr("title", __("Linked to the shipping item row — booked once, not twice"));
+    return true;
+}
+
+// Detect gross-priced rows (items sum matches the net subtotal only after
+// removing each row's VAT share) and convert them to net in place.
+function _maybe_convert_gross_rows(wrapper) {
+    var subtotal = parseFloat(
+        wrapper.find('.review-field[data-field="subtotal"]').val()
+    );
+    if (!subtotal) return;
+
+    var rows = [];
+    var gross = 0;
+    var net = 0;
+    wrapper.find(".items-table tbody tr.item-main-row").each(function () {
+        var $row = $(this);
+        var $cell = $row.find(".qty-uom-cell");
+        var total = parseFloat($cell.data("line-total")) || 0;
+        var rate = parseFloat($row.find(".review-item-tax").val()) || 0;
+        gross += total;
+        net += total / (1 + rate / 100);
+        rows.push({ $cell: $cell, total: total, rate: rate });
+    });
+
+    var tol = 0.02 * rows.length + 0.02;
+    if (Math.abs(gross - subtotal) <= tol) return;   // already net
+    if (Math.abs(net - subtotal) > tol) return;      // not a pure VAT delta
+
+    rows.forEach(function (r) {
+        var factor = 1 + r.rate / 100;
+        if (factor === 1) return;
+        var new_total = Math.round((r.total / factor) * 100) / 100;
+        r.$cell.data("line-total", new_total);
+        _recalc_qty_cell(wrapper, r.$cell.data("idx"));
+    });
+
+    wrapper.find(".gross-net-notice").remove();
+    wrapper.find(".totals-check").after(
+        '<div class="gross-net-notice">' +
+        __("Gross prices detected — line items were converted to net using each row's tax rate") +
+        "</div>"
+    );
+}
+
 function _update_totals_check(wrapper) {
     var $check = wrapper.find(".totals-check");
     if (!$check.length) return;
@@ -953,6 +1070,8 @@ function _update_totals_check(wrapper) {
         var v = wrapper.find('.review-field[data-field="' + key + '"]').val();
         return v === "" || v === undefined || v === null ? null : parseFloat(v);
     };
+    var shipping_in_items = _sync_shipping_rows_to_field(wrapper);
+
     var subtotal = read("subtotal");
     var tax = read("tax_amount");
     var shipping = read("shipping_cost");
@@ -974,7 +1093,9 @@ function _update_totals_check(wrapper) {
     }
     if (total !== null) {
         var base = subtotal !== null ? subtotal : sum;
-        var net_total = base + (tax || 0) + (shipping || 0);
+        // Shipping carried by an item row is already inside the items sum /
+        // subtotal — adding the shipping field again would double-count it.
+        var net_total = base + (tax || 0) + (shipping_in_items ? 0 : (shipping || 0));
         var net_ok = Math.abs(net_total - total) <= 0.02;
         var gross_ok = Math.abs(base - total) <= 0.02;
         if (!net_ok && !gross_ok) {
