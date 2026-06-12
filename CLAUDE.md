@@ -52,11 +52,14 @@ Upload (PDF/Image/Email)
 
 When `require_document_review` is enabled in Settings (default: on), the pipeline pauses after LLM extraction and consensus, entering the **Awaiting Review** status. The user sees:
 
-- **Header fields** — editable inputs for all extracted fields (supplier, dates, amounts, etc.) with per-field confidence badges (N/M agreement across LLM providers)
-- **Items table** — editable rows for each line item with a "Map to Item" Link control to manually select an existing ERPNext Item (bypasses `_resolve_item` fuzzy matching)
-- **Approve & Create Documents** button — saves `reviewed_data` + `item_mapping` JSON, triggers `run_chain_from_review()` background job
+- **Header fields** — editable inputs for all extracted fields (supplier, dates, amounts, etc.) with per-field confidence badges (N/M agreement across LLM providers). `document_type` is an editable Select — it determines which documents get created; `run_chain_from_review()` prefers it over the original classification (via `_resolve_detected_type`).
+- **Items table** — editable rows for each line item (incl. per-item Tax % and Type stock/service), with a "Map to Item" Link control to manually select an existing ERPNext Item (bypasses `_resolve_item` fuzzy matching). Rows can be **deleted** (× button) and **added** ("+ Add Item"); collection reindexes by DOM order.
+- **Totals plausibility line** — live check: items sum vs. Subtotal, and Subtotal + Tax + Shipping vs. Total.
+- **Approve & Create Documents** button — saves `reviewed_data` + `item_mapping` JSON, triggers `run_chain_from_review()` background job. Client-side validation blocks approval with a clear message when a date field is empty, a row has no item name, or no rows exist; the server rejects invalid reviewed data with a per-field Pydantic error list. The button is guarded against double-clicks (`frappe.dom.freeze`).
 
 The `item_mapping` parameter flows through `RetrospectiveChainBuilder.build_chain()` into all three chain builders (`_build_items`, `_build_receipt_items`, `_build_invoice_items`). When an item index has a mapped item_code, `_resolve_item()` is skipped entirely for that item.
+
+**Index alignment**: `sanitize_extracted_data()` stamps every item with `_orig_idx` (its index in the raw/reviewed list) before removing shipping/discount/surcharge rows. All consumers of `item_mapping`/`stock_uom_mapping` (the three `_build_*_items`, `precreate_items`, `check_review_matches`) key mapping lookups by `item.get("_orig_idx", idx)` — never by position in the sanitized list.
 
 When `require_document_review` is disabled, the pipeline auto-creates documents as before (no pause).
 
@@ -198,7 +201,7 @@ Prompts instruct LLMs to **prefer EUR** when a document shows amounts in more th
 
 ### LLM Provider Support
 
-Cloud providers via LangChain: Claude (`langchain-anthropic`), OpenAI (`langchain-openai`), Gemini (`langchain-google-genai`).
+Cloud providers via LangChain: Claude (`langchain-anthropic`), OpenAI (`langchain-openai`), Gemini (`langchain-google-genai`). Model IDs are configurable in Settings (`claude_model_name`, `openai_model_name`, `gemini_model_name`); fallback defaults live in `DEFAULT_CLOUD_MODELS` in `llm/models.py`.
 
 Local LLMs via `ChatOpenAI` with custom `base_url`: Ollama, vLLM, llama.cpp, LM Studio. All implement OpenAI-compatible API.
 

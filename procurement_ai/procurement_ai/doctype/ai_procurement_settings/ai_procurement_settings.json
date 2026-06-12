@@ -19,9 +19,12 @@
         "escalation_email",
         "cloud_llm_section",
         "claude_api_key",
+        "claude_model_name",
         "openai_api_key",
+        "openai_model_name",
         "column_break_cloud",
         "gemini_api_key",
+        "gemini_model_name",
         "local_llm_section",
         "enable_local_llm",
         "local_llm_provider",
@@ -133,9 +136,23 @@
             "label": "Claude API Key (Anthropic)"
         },
         {
+            "fieldname": "claude_model_name",
+            "fieldtype": "Data",
+            "label": "Claude Model Name",
+            "default": "claude-sonnet-4-5-20250929",
+            "description": "Anthropic model ID used for extraction"
+        },
+        {
             "fieldname": "openai_api_key",
             "fieldtype": "Password",
             "label": "OpenAI API Key"
+        },
+        {
+            "fieldname": "openai_model_name",
+            "fieldtype": "Data",
+            "label": "OpenAI Model Name",
+            "default": "gpt-4o",
+            "description": "OpenAI model ID used for extraction"
         },
         {
             "fieldname": "column_break_cloud",
@@ -145,6 +162,13 @@
             "fieldname": "gemini_api_key",
             "fieldtype": "Password",
             "label": "Gemini API Key (Google)"
+        },
+        {
+            "fieldname": "gemini_model_name",
+            "fieldtype": "Data",
+            "label": "Gemini Model Name",
+            "default": "gemini-1.5-flash",
+            "description": "Google Gemini model ID used for extraction"
         },
         {
             "fieldname": "local_llm_section",

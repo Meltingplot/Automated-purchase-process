@@ -212,7 +212,7 @@ def run_extraction_pipeline(procurement_job_name: str):
             )
             job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
             consensus = result.get("consensus") or {}
-            job.consensus_data = json.dumps(consensus)
+            job.consensus_data = json.dumps(consensus, ensure_ascii=False)
             job.detected_type = _resolve_detected_type(
                 result.get("source_type_hint", ""), consensus,
             )
@@ -244,7 +244,7 @@ def run_extraction_pipeline(procurement_job_name: str):
         if settings.get("require_document_review") or force_review:
             job.status = "Awaiting Review"
             job.confidence_score = float(result.get("confidence", 0.0) or 0.0)
-            job.consensus_data = json.dumps(consensus_data)
+            job.consensus_data = json.dumps(consensus_data, ensure_ascii=False)
             job.detected_type = _resolve_detected_type(source_type, consensus_data)
             job.save()
             frappe.db.commit()
@@ -316,7 +316,7 @@ def _complete_job(job, pipeline_result: dict | None, consensus_data: dict, sourc
         confidence = float(job.confidence_score)
 
     job.confidence_score = confidence
-    job.consensus_data = json.dumps(consensus_data)
+    job.consensus_data = json.dumps(consensus_data, ensure_ascii=False)
     job.detected_type = _resolve_detected_type(source_type, consensus_data)
     job.created_supplier = created.get("supplier")
     job.created_po = created.get("purchase_order")
@@ -425,7 +425,11 @@ def run_chain_from_review(procurement_job_name: str):
         # User-assigned supplier (overrides fuzzy matching when set)
         supplier_mapping = job.supplier_mapping or None
 
-        source_type = job.detected_type or "Invoice"
+        # Prefer the reviewer-corrected document_type (from the review UI's
+        # Document Type select) over the original classification.
+        source_type = _resolve_detected_type(
+            job.detected_type or "Invoice", consensus_data,
+        ) or "Invoice"
         source_file_url = job.source_document_url or job.source_document
 
         from ...chain_builder.retrospective import RetrospectiveChainBuilder
@@ -564,7 +568,8 @@ def _save_extraction_results(job, pipeline_result: dict):
                 "model_version": result.get("model_version", ""),
                 "extracted_data": json.dumps(
                     result.get("extracted_data")
-                    or {"errors": result.get("errors", [])}
+                    or {"errors": result.get("errors", [])},
+                    ensure_ascii=False,
                 ),
                 "confidence": result.get("confidence", 0.0),
                 "processing_time_ms": result.get("processing_time_ms", 0),
@@ -590,7 +595,8 @@ def _create_escalation(job, pipeline_result: dict):
             "status": "Open",
             "reason": "\n".join(clean_reasons)[:2000],
             "disputed_fields": json.dumps(
-                pipeline_result.get("disputed_fields", {})
+                pipeline_result.get("disputed_fields", {}),
+                ensure_ascii=False,
             ),
         }
     )

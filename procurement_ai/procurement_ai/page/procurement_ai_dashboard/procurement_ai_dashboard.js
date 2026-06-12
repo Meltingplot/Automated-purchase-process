@@ -98,7 +98,7 @@ function render_recent_jobs(page, jobs) {
                 '<span class="ellipsis">' + __(job.status) + "</span></span> " +
                 "<strong>" + job.name + "</strong>" +
                 " &mdash; " + frappe.utils.escape_html(job.detected_type || job.source_type || "") +
-                ' <span class="text-muted pull-right">' +
+                ' <span class="text-muted" style="float:right;">' +
                 confidence + " | " + frappe.datetime.prettyDate(job.creation) +
                 "</span></a></div>";
         });
@@ -124,7 +124,7 @@ function render_escalations(page, escalations) {
                 'border-radius:6px;background:var(--subtle-fg);">' +
                 '<a href="/app/ai-procurement-job/' + esc.procurement_job + '">' +
                 "<strong>" + frappe.utils.escape_html(esc.procurement_job) + "</strong></a>" +
-                '<span class="badge badge-warning pull-right">' +
+                '<span class="badge badge-warning" style="float:right;">' +
                 frappe.utils.escape_html(esc.escalation_type) + "</span>" +
                 '<div class="text-muted" style="margin-top:4px;font-size:0.9em;">' +
                 frappe.utils.escape_html((esc.reason || "").substring(0, 100)) +

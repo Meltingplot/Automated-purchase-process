@@ -13,9 +13,9 @@ sys.modules.setdefault("langgraph", langgraph_mock)
 sys.modules.setdefault("langgraph.graph", langgraph_mock.graph)
 langgraph_mock.graph.END = "END"
 
-# Mock pydantic
-pydantic_mock = MagicMock()
-sys.modules.setdefault("pydantic", pydantic_mock)
+# NOTE: pydantic is intentionally NOT mocked — it is a real (installed)
+# dependency, and a sys.modules mock here would leak into every later test
+# module (test_schemas, test_output_guard) in the same pytest process.
 
 for mod in (
     "langchain_anthropic",

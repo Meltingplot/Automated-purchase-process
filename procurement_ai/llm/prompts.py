@@ -41,6 +41,7 @@ RULES:
 9. subtotal = sum of all item total_price values. total_amount = subtotal + tax_amount + shipping_cost.
 10. For each item, set item_type to "stock" for physical/tangible goods or "service" for services, fees, shipping, licenses, consulting, installation, etc.
 11. If the document shows amounts in more than one currency (e.g. both EUR and USD), PREFER EUR: extract the EUR values for all monetary fields and set currency to "EUR". Only use a non-EUR currency when EUR amounts are not present in the document.
+12. UOM and pack size: combine the unit column WITH the item name/description. When an item is sold in a package unit (VPE, Pack, Karton, Box, Gebinde) and the name or description states how many base units one package contains (e.g. "1000 Stück", "(100 Stück)", "à 50", "100 Schrauben"), set uom to the package unit AND pack_size to that contained count. quantity stays the number of packages, unit_price stays the NET price per package. This also applies when the unit column shows a piece unit but the line is clearly priced per package (e.g. quantity 1 "Stk" with "1000 Stück pro VPE" in the description → uom "VPE", pack_size 1000). When the line is genuinely priced per base unit, leave pack_size null.
 
 You MUST respond in the following JSON format:
 {schema}"""
@@ -93,6 +94,7 @@ FEW_SHOT_EXAMPLE = '''{
       "item_name": "Schrauben M8x50",
       "quantity": 100,
       "uom": "Stk",
+      "pack_size": null,
       "unit_price": 0.15,
       "total_price": 15.00,
       "tax_rate": 19.0,
@@ -100,18 +102,31 @@ FEW_SHOT_EXAMPLE = '''{
     },
     {
       "position": 2,
+      "item_name": "Muttern M8 (200 Stück)",
+      "description": "Sechskantmuttern verzinkt - VPE mit 200 Stück",
+      "quantity": 1,
+      "uom": "VPE",
+      "pack_size": 200,
+      "unit_price": 8.50,
+      "total_price": 8.50,
+      "tax_rate": 19.0,
+      "item_type": "stock"
+    },
+    {
+      "position": 3,
       "item_name": "Versandkosten",
       "quantity": 1,
       "uom": "Stk",
+      "pack_size": null,
       "unit_price": 5.90,
       "total_price": 5.90,
       "tax_rate": 19.0,
       "item_type": "service"
     }
   ],
-  "subtotal": 20.90,
-  "tax_amount": 3.97,
-  "total_amount": 24.87,
+  "subtotal": 29.40,
+  "tax_amount": 5.59,
+  "total_amount": 34.99,
   "confidence_self_assessment": 0.9
 }'''
 
@@ -142,7 +157,8 @@ Schema fields:
 - delivery_date: Expected delivery date (optional)
 - payment_terms: Payment terms text (optional)
 - currency: Currency code, default "EUR". If amounts appear in multiple currencies, prefer EUR and extract the EUR values.
-- items: List of line items, each with: item_name, quantity, uom, unit_price, total_price, tax_rate, item_type ("stock" or "service")
+- items: List of line items, each with: item_name, quantity, uom, pack_size, unit_price, total_price, tax_rate, item_type ("stock" or "service")
+- pack_size: units per package when uom is a package unit (VPE/Pack/Karton) and the name/description states the content (e.g. "1000 Stück" → 1000); null for base units
 - subtotal: Net total before tax (optional)
 - tax_amount: Total tax (optional)
 - total_amount: Grand total including tax (optional)

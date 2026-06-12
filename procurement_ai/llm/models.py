@@ -13,6 +13,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# Fallback model IDs when no model name is configured in Settings
+DEFAULT_CLOUD_MODELS = {
+    "claude": "claude-sonnet-4-5-20250929",
+    "openai": "gpt-4o",
+    "gemini": "gemini-1.5-flash",
+}
+
+
 class LLMProviderFactory:
     """
     Creates LangChain-compatible chat models for all providers.
@@ -63,7 +71,7 @@ class LLMProviderFactory:
         from langchain_anthropic import ChatAnthropic
 
         return ChatAnthropic(
-            model="claude-sonnet-4-5-20250929",
+            model=settings.get("claude_model_name") or DEFAULT_CLOUD_MODELS["claude"],
             api_key=api_key,
             max_tokens=4096,
             timeout=60,
@@ -78,7 +86,7 @@ class LLMProviderFactory:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model="gpt-4o",
+            model=settings.get("openai_model_name") or DEFAULT_CLOUD_MODELS["openai"],
             api_key=api_key,
             max_tokens=4096,
             timeout=60,
@@ -93,7 +101,7 @@ class LLMProviderFactory:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model=settings.get("gemini_model_name") or DEFAULT_CLOUD_MODELS["gemini"],
             google_api_key=api_key,
             max_output_tokens=4096,
         )
@@ -149,11 +157,11 @@ class LLMProviderFactory:
     def get_model_version(provider: str, settings: dict) -> str:
         """Return the model version string for a given provider."""
         if provider == "claude":
-            return "claude-sonnet-4-5-20250929"
+            return settings.get("claude_model_name") or DEFAULT_CLOUD_MODELS["claude"]
         elif provider == "openai":
-            return "gpt-4o"
+            return settings.get("openai_model_name") or DEFAULT_CLOUD_MODELS["openai"]
         elif provider == "gemini":
-            return "gemini-1.5-flash"
+            return settings.get("gemini_model_name") or DEFAULT_CLOUD_MODELS["gemini"]
         elif provider == "local":
             return settings.get("local_llm_model_name", "unknown-local")
         return "unknown"

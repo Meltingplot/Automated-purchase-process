@@ -139,11 +139,14 @@ def _build_items(
         schedule_date = doc_date
 
     for idx, item in enumerate(extracted_data.get("items", [])):
-        mapped_code = item_mapping.get(idx) if item_mapping else None
+        # Mappings are keyed by the review-UI row index; sanitization may have
+        # removed rows (shipping/discount), so use the stamped original index.
+        map_idx = item.get("_orig_idx", idx)
+        mapped_code = item_mapping.get(map_idx) if item_mapping else None
         # A key present with None value means user explicitly cleared the mapping
         # → force creation of a new item (skip fuzzy matching).
-        user_cleared = item_mapping is not None and idx in item_mapping and item_mapping[idx] is None
-        stock_uom = stock_uom_mapping.get(idx) if stock_uom_mapping else None
+        user_cleared = item_mapping is not None and map_idx in item_mapping and item_mapping[map_idx] is None
+        stock_uom = stock_uom_mapping.get(map_idx) if stock_uom_mapping else None
         if mapped_code:
             item_code = mapped_code
             # User-mapped item — ensure supplier link exists on the item
@@ -1184,8 +1187,15 @@ def _create_item(item: dict, supplier: str, settings: dict, stock_uom: str | Non
     item_desc = _sanitize_text(item.get("description", item_name), max_len=500)
     item_code = _sanitize_code(item.get("item_code", ""))
     uom = _resolve_uom(item.get("uom") or "")
-    # Use user-specified stock UOM if provided, otherwise default to transaction UOM
-    effective_stock_uom = _resolve_uom(stock_uom) if stock_uom else uom
+    # Use user-specified stock UOM if provided, otherwise default to the
+    # transaction UOM — except for numeric bulk UOMs ("1000"): stock is always
+    # kept in pieces, the numeric UOM only scales the transaction line.
+    if stock_uom:
+        effective_stock_uom = _resolve_uom(stock_uom)
+    elif _is_numeric_uom(uom):
+        effective_stock_uom = _get_piece_uom()
+    else:
+        effective_stock_uom = uom
 
     # item_code is mandatory in ERPNext. Generate a unique SKU to avoid
     # collisions — neither the supplier's part number nor item_name are

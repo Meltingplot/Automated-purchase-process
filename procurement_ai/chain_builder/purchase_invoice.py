@@ -143,10 +143,13 @@ def _build_invoice_items(
         # Use item_code from linked PO/PR item when available — must match for ERPNext validation
         po_linked_code = po_item_links[idx]["item_code"] if po_item_links and idx in po_item_links else None
         pr_linked_code = pr_item_links[idx]["item_code"] if pr_item_links and idx in pr_item_links else None
-        mapped_code = item_mapping.get(idx) if item_mapping else None
+        # Mappings are keyed by the review-UI row index; sanitization may have
+        # removed rows (shipping/discount), so use the stamped original index.
+        map_idx = item.get("_orig_idx", idx)
+        mapped_code = item_mapping.get(map_idx) if item_mapping else None
         # A key present with None value means user explicitly cleared the mapping
         # → force creation of a new item (skip fuzzy matching).
-        user_cleared = item_mapping is not None and idx in item_mapping and item_mapping[idx] is None
+        user_cleared = item_mapping is not None and map_idx in item_mapping and item_mapping[map_idx] is None
         if po_linked_code:
             item_code = po_linked_code
         elif pr_linked_code:
@@ -154,9 +157,9 @@ def _build_invoice_items(
         elif mapped_code:
             item_code = mapped_code
         elif user_cleared:
-            item_code = _create_item(item, supplier, settings, stock_uom=(stock_uom_mapping.get(idx) if stock_uom_mapping else None))
+            item_code = _create_item(item, supplier, settings, stock_uom=(stock_uom_mapping.get(map_idx) if stock_uom_mapping else None))
         else:
-            item_code = _resolve_item(item, settings, supplier, stock_uom=(stock_uom_mapping.get(idx) if stock_uom_mapping else None))
+            item_code = _resolve_item(item, settings, supplier, stock_uom=(stock_uom_mapping.get(map_idx) if stock_uom_mapping else None))
         # Ensure supplier link for user-mapped or PO/PR-linked items
         if po_linked_code or pr_linked_code or mapped_code:
             extracted_code = _sanitize_code(item.get("item_code", ""))
