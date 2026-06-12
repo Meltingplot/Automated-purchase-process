@@ -92,11 +92,11 @@ class AIProcurementJob(Document):
                     title=_("Validation Error"),
                 )
 
-            self.reviewed_data = reviewed_data if isinstance(reviewed_data, str) else json.dumps(reviewed_data)
+            self.reviewed_data = reviewed_data if isinstance(reviewed_data, str) else json.dumps(reviewed_data, ensure_ascii=False)
         if item_mapping is not None:
-            self.item_mapping = item_mapping if isinstance(item_mapping, str) else json.dumps(item_mapping)
+            self.item_mapping = item_mapping if isinstance(item_mapping, str) else json.dumps(item_mapping, ensure_ascii=False)
         if stock_uom_mapping is not None:
-            self.stock_uom_mapping = stock_uom_mapping if isinstance(stock_uom_mapping, str) else json.dumps(stock_uom_mapping)
+            self.stock_uom_mapping = stock_uom_mapping if isinstance(stock_uom_mapping, str) else json.dumps(stock_uom_mapping, ensure_ascii=False)
         if supplier_mapping is not None:
             # Validate the assigned supplier exists before storing
             supplier_mapping = supplier_mapping.strip()
