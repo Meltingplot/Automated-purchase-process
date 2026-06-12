@@ -221,16 +221,21 @@ var _REVIEW_CSS = '<style>' +
     '  margin-top: 16px; background: var(--subtle-fg);' +
     '}' +
     '.comparison-panel h6 { margin: 0 0 12px; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }' +
-    '.items-table { width: 100%; border-collapse: collapse; }' +
-    '.items-table th { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); padding: 6px 8px; border-bottom: 2px solid var(--border-color); }' +
-    '.items-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color); vertical-align: top; }' +
+    // Fixed layout: name/description share the flexible space, numeric
+    // columns stay narrow, inputs fill their cell. Wrapper scrolls if needed.
+    '.items-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 1080px; }' +
+    '.items-table th { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-muted); padding: 6px; border-bottom: 2px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }' +
+    '.items-table td { padding: 6px; border-bottom: 1px solid var(--border-color); vertical-align: top; }' +
     '.items-table .review-input { padding: 2px 4px; }' +
+    '.items-table .line-total { display: block; text-align: right; white-space: nowrap; }' +
     '.stock-summary { cursor: pointer; margin-top: 2px; font-size: 0.85em; color: var(--text-muted); white-space: nowrap; user-select: none; }' +
     '.stock-summary:hover { color: var(--text-color); }' +
     '.stock-summary .stock-edit-icon { font-size: 0.85em; opacity: 0.6; }' +
-    '.stock-detail { display: none; margin-top: 2px; white-space: nowrap; }' +
-    '.stock-detail.open { display: flex; align-items: center; gap: 3px; }' +
-    '.uom-new-hint { display: none; margin-top: 2px; font-size: 0.75em; color: #d69e2e; white-space: nowrap; }' +
+    // Edit row stacks vertically so it fits the narrow qty column
+    '.stock-detail { display: none; margin-top: 2px; }' +
+    '.stock-detail.open { display: block; }' +
+    '.stock-detail .review-input, .stock-detail .stock-uom-control { display: block; width: 100% !important; margin-top: 2px; }' +
+    '.uom-new-hint { display: none; margin-top: 2px; font-size: 0.75em; color: #d69e2e; }' +
     // Theme-aware colors (work in dark mode, fall back to light-theme values)
     '.review-banner-warning { background: var(--bg-yellow, #fff3cd); border: 1px solid var(--yellow-300, #ffc107); color: var(--text-on-yellow, #856404); }' +
     '.review-banner-warning pre { color: inherit; }' +
@@ -369,6 +374,20 @@ function _render_review_ui(frm, options) {
 
     html += '<div style="overflow-x:auto;">';
     html += '<table class="items-table">';
+    // Column widths (fixed layout): name + description share the remainder
+    html += '<colgroup>' +
+        '<col style="width:30px;">' +   // #
+        '<col style="width:110px;">' +  // supplier code
+        '<col>' +                        // item name (flex)
+        '<col>' +                        // description (flex)
+        '<col style="width:110px;">' +  // qty + stock summary
+        '<col style="width:85px;">' +   // rate
+        '<col style="width:55px;">' +   // tax %
+        '<col style="width:85px;">' +   // type
+        '<col style="width:90px;">' +   // total
+        '<col style="width:150px;">' +  // map to item
+        '<col style="width:30px;">' +   // delete
+        '</colgroup>';
     html += '<thead><tr>';
     html += '<th>#</th>';
     _ITEM_FIELDS.forEach(function (f) {
@@ -714,7 +733,7 @@ function _item_row_html(item, idx, doc_currency) {
         ' data-line-total="' + total + '" data-invoice-qty="' + qty + '"' +
         ' data-invoice-rate="' + rate + '" style="white-space:nowrap;">' +
         '<input type="number" class="review-input doc-qty" data-idx="' + idx + '"' +
-        ' step="any" style="width:56px;" value="' + qty + '" />' +
+        ' step="any" style="width:100%;" value="' + qty + '" />' +
         // Compact stock line: "= 200 Stk ✎" — click swaps to edit inputs
         '<div class="stock-summary" data-idx="' + idx + '"' +
         ' title="' + __("Edit stock quantity / unit") + '">' +
@@ -725,10 +744,10 @@ function _item_row_html(item, idx, doc_currency) {
         // Edit row (hidden until the summary is clicked)
         '<div class="stock-detail" data-idx="' + idx + '">' +
         '<input type="number" class="review-input stock-qty" data-idx="' + idx + '"' +
-        ' step="any" style="width:56px;" value="' + qty + '" />' +
+        ' step="any" value="' + qty + '" />' +
         '<div class="stock-uom-control" data-idx="' + idx + '"' +
         ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"' +
-        ' style="display:inline-block;width:90px;"></div>' +
+        '></div>' +
         '<span class="qty-info" data-idx="' + idx + '"' +
         ' style="font-size:0.8em;color:var(--text-muted);"></span>' +
         '</div>' +
@@ -740,16 +759,16 @@ function _item_row_html(item, idx, doc_currency) {
     // Rate (editable unit price; drives line total)
     html +=
         '<td><input type="number" class="review-input doc-rate" data-idx="' + idx + '"' +
-        ' step="any" style="width:90px;" value="' + _fmt_rate(rate) + '" /></td>';
+        ' step="any" style="width:100%;" value="' + _fmt_rate(rate) + '" /></td>';
 
     // Tax rate (%) — feeds the Purchase Taxes and Charges rows
     html +=
         '<td><input type="number" class="review-input review-item-tax" data-idx="' + idx + '"' +
-        ' step="any" style="width:55px;" value="' + frappe.utils.escape_html(String(tax_val)) + '" /></td>';
+        ' step="any" style="width:100%;" value="' + frappe.utils.escape_html(String(tax_val)) + '" /></td>';
 
     // Item type (stock/service) — controls is_stock_item on new Items
     html +=
-        '<td><select class="review-input review-item-type" data-idx="' + idx + '">' +
+        '<td><select class="review-input review-item-type" data-idx="' + idx + '" style="width:100%;">' +
         '<option value=""' + (item_type === "" ? " selected" : "") + '>' + __("Auto") + '</option>' +
         '<option value="stock"' + (item_type === "stock" ? " selected" : "") + '>' + __("Stock") + '</option>' +
         '<option value="service"' + (item_type === "service" ? " selected" : "") + '>' + __("Service") + '</option>' +
