@@ -224,9 +224,14 @@ var _REVIEW_CSS = '<style>' +
     // below carries name + description at full width and the row border.
     '.items-table tr.item-main-row td { border-bottom: none; padding-bottom: 2px; }' +
     '.items-table tr.item-text-row td { border-bottom: 1px solid var(--border-color); padding-top: 0; padding-bottom: 10px; }' +
-    '.item-text-row .text-fields { display: flex; gap: 8px; }' +
+    '.item-text-row .text-fields { display: flex; gap: 8px; align-items: flex-start; }' +
     '.item-text-row .item-name-input { flex: 2; font-weight: 500; }' +
-    '.item-text-row .item-desc-input { flex: 3; color: var(--text-muted); }' +
+    // Description wraps and grows with its content (auto-sized textarea)
+    '.item-text-row .item-desc-input { flex: 3; color: var(--text-muted); resize: none; overflow: hidden; line-height: 1.4; min-height: 26px; font-family: inherit; }' +
+    // Map to Item: badge and Link control share one line
+    '.map-cell { display: flex; align-items: center; gap: 6px; }' +
+    '.map-cell .item-match-cell { flex-shrink: 0; }' +
+    '.map-cell .item-link-control { flex: 1; min-width: 0; }' +
     '.items-table .review-input { padding: 2px 4px; }' +
     '.items-table .line-total { display: block; text-align: right; white-space: nowrap; }' +
     '.stock-summary { cursor: pointer; margin-top: 2px; font-size: 0.85em; color: var(--text-muted); white-space: nowrap; user-select: none; }' +
@@ -483,6 +488,13 @@ function _render_review_ui(frm, options) {
     // Delegated events: survive dynamically added/removed rows and don't
     // stack across re-renders (namespaced off() first).
     wrapper.off(".reviewui");
+    // Auto-grow description textareas (initially and while typing)
+    wrapper.find(".item-desc-input").each(function () {
+        _autosize_textarea(this);
+    });
+    wrapper.on("input.reviewui", ".item-desc-input", function () {
+        _autosize_textarea(this);
+    });
     // Stock summary click → swap to the edit row (and back)
     wrapper.on("click.reviewui", ".stock-summary", function () {
         var idx = $(this).data("idx");
@@ -783,13 +795,13 @@ function _item_row_html(item, idx, doc_currency) {
         ' style="font-weight:600;">' +
         format_currency(total, doc_currency) + '</span></td>';
 
-    // Map to Item
+    // Map to Item: badge and Link control side by side on one line
     html +=
-        '<td>' +
-        '<div class="item-match-cell" data-idx="' + idx + '" style="margin-bottom:4px;">' +
+        '<td><div class="map-cell">' +
+        '<div class="item-match-cell" data-idx="' + idx + '">' +
         '<span class="text-muted" style="font-size:0.8em;">' + __("Checking...") + '</span></div>' +
         '<div class="item-link-control" data-idx="' + idx + '"></div>' +
-        '</td>';
+        '</div></td>';
 
     // Remove row
     html +=
@@ -809,10 +821,10 @@ function _item_row_html(item, idx, doc_currency) {
         ' data-idx="' + idx + '" data-field="item_name"' +
         ' placeholder="' + __("Item Name") + '" title="' + __("Item Name") + '"' +
         ' value="' + frappe.utils.escape_html(String(name_val)) + '" />' +
-        '<input type="text" class="review-input review-item-field item-desc-input"' +
+        '<textarea rows="1" class="review-input review-item-field item-desc-input"' +
         ' data-idx="' + idx + '" data-field="description"' +
         ' placeholder="' + __("Description") + '" title="' + __("Description") + '"' +
-        ' value="' + frappe.utils.escape_html(String(desc_val)) + '" />' +
+        '>' + frappe.utils.escape_html(String(desc_val)) + '</textarea>' +
         '</div></td>';
     html += '</tr>';
     return html;
@@ -1545,6 +1557,12 @@ function _recalc_qty_cell(wrapper, idx) {
     // Sub-cent validation
     _validate_rate(wrapper, idx, rate, line_total, doc_qty);
     _update_totals_check(wrapper);
+}
+
+// Grow a textarea to fit its content (no inner scrollbar)
+function _autosize_textarea(el) {
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + 2 + "px";
 }
 
 // Refresh the compact "= 200 Stk" stock summary line from the edit inputs.
