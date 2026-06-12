@@ -437,8 +437,8 @@ function _render_review_ui(frm, options) {
         var is_total = f.key === "total_amount";
         html += '<div class="total-row ' + conf_class + '">';
         html += '<label>' + __(f.label) + ':</label>';
-        html += '<input type="number" class="review-input review-field total-input' +
-            (is_total ? '" style="font-weight:700;' : '"') +
+        html += '<input type="number" class="review-input review-field total-input"' +
+            (is_total ? ' style="font-weight:700;"' : '') +
             ' data-field="' + f.key + '" value="' + frappe.utils.escape_html(String(val)) + '"' +
             ' step="any" />';
         html += '</div>';
