@@ -185,12 +185,6 @@ var _TOTALS_FIELDS = [
 // All header fields combined (used by _compute_confidence and _collect_review_data)
 var _HEADER_FIELDS = _SUPPLIER_FIELDS.concat(_DOCUMENT_FIELDS).concat(_TOTALS_FIELDS);
 
-var _ITEM_FIELDS = [
-    { key: "item_code", label: "Supplier Code" },
-    { key: "item_name", label: "Item Name" },
-    { key: "description", label: "Description" },
-];
-
 var _REVIEW_CSS = '<style>' +
     '.review-input {' +
     '  border: none; border-bottom: 1px solid transparent; background: transparent;' +
@@ -223,9 +217,16 @@ var _REVIEW_CSS = '<style>' +
     '.comparison-panel h6 { margin: 0 0 12px; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }' +
     // Fixed layout: name/description share the flexible space, numeric
     // columns stay narrow, inputs fill their cell. Wrapper scrolls if needed.
-    '.items-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 960px; }' +
+    '.items-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 720px; }' +
     '.items-table th { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-muted); padding: 6px; border-bottom: 2px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }' +
     '.items-table td { padding: 6px; border-bottom: 1px solid var(--border-color); vertical-align: top; }' +
+    // Each item = two rows: the main row keeps the numbers, the text row
+    // below carries name + description at full width and the row border.
+    '.items-table tr.item-main-row td { border-bottom: none; padding-bottom: 2px; }' +
+    '.items-table tr.item-text-row td { border-bottom: 1px solid var(--border-color); padding-top: 0; padding-bottom: 10px; }' +
+    '.item-text-row .text-fields { display: flex; gap: 8px; }' +
+    '.item-text-row .item-name-input { flex: 2; font-weight: 500; }' +
+    '.item-text-row .item-desc-input { flex: 3; color: var(--text-muted); }' +
     '.items-table .review-input { padding: 2px 4px; }' +
     '.items-table .line-total { display: block; text-align: right; white-space: nowrap; }' +
     '.stock-summary { cursor: pointer; margin-top: 2px; font-size: 0.85em; color: var(--text-muted); white-space: nowrap; user-select: none; }' +
@@ -379,25 +380,22 @@ function _render_review_ui(frm, options) {
 
     html += '<div style="overflow-x:auto;">';
     html += '<table class="items-table">';
-    // Column widths (fixed layout): name + description share the remainder
+    // Column widths (fixed layout): Map to Item takes the remainder; item
+    // name + description live in a full-width second row per item.
     html += '<colgroup>' +
         '<col style="width:28px;">' +   // #
-        '<col style="width:100px;">' +  // supplier code
-        '<col>' +                        // item name (flex)
-        '<col>' +                        // description (flex)
-        '<col style="width:100px;">' +  // qty + stock summary
-        '<col style="width:78px;">' +   // rate
-        '<col style="width:50px;">' +   // tax %
-        '<col style="width:78px;">' +   // type
-        '<col style="width:85px;">' +   // total
-        '<col style="width:140px;">' +  // map to item
+        '<col style="width:130px;">' +  // supplier code
+        '<col style="width:110px;">' +  // qty + stock summary
+        '<col style="width:90px;">' +   // rate
+        '<col style="width:55px;">' +   // tax %
+        '<col style="width:90px;">' +   // type
+        '<col style="width:100px;">' +  // total
+        '<col>' +                        // map to item (flex)
         '<col style="width:28px;">' +   // delete
         '</colgroup>';
     html += '<thead><tr>';
     html += '<th>#</th>';
-    _ITEM_FIELDS.forEach(function (f) {
-        html += '<th>' + __(f.label) + '</th>';
-    });
+    html += '<th>' + __("Supplier Code") + '</th>';
     html += '<th>' + __("Qty") + '</th>';
     html += '<th>' + __("Rate") + '</th>';
     html += '<th>' + __("Tax %") + '</th>';
@@ -510,7 +508,9 @@ function _render_review_ui(frm, options) {
         _update_totals_check(wrapper);
     });
     wrapper.on("click.reviewui", ".item-delete", function () {
-        $(this).closest("tr").remove();
+        var $tr = $(this).closest("tr");
+        $tr.next("tr.item-text-row").remove();
+        $tr.remove();
         frm.dirty();
         _renumber_rows(wrapper);
         _update_totals_check(wrapper);
@@ -719,18 +719,16 @@ function _item_row_html(item, idx, doc_currency) {
     var tax_val = tax_rate === null || tax_rate === undefined ? "" : tax_rate;
     var item_type = item["item_type"] || "";
 
-    var html = '<tr data-item-idx="' + idx + '">';
+    var html = '<tr class="item-main-row" data-item-idx="' + idx + '">';
     html += '<td class="row-num">' + (idx + 1) + '</td>';
 
-    // Text fields (code, name, description)
-    _ITEM_FIELDS.forEach(function (f) {
-        var val = item[f.key];
-        if (val === null || val === undefined) val = "";
-        html +=
-            '<td><input type="text" class="review-input review-item-field"' +
-            ' data-idx="' + idx + '" data-field="' + f.key + '"' +
-            ' value="' + frappe.utils.escape_html(String(val)) + '" /></td>';
-    });
+    // Supplier code (item name + description live in the full-width text row)
+    var code_val = item["item_code"];
+    if (code_val === null || code_val === undefined) code_val = "";
+    html +=
+        '<td><input type="text" class="review-input review-item-field"' +
+        ' data-idx="' + idx + '" data-field="item_code"' +
+        ' value="' + frappe.utils.escape_html(String(code_val)) + '" /></td>';
 
     // Qty column: doc qty input + compact stock summary (click to edit)
     html +=
@@ -797,6 +795,25 @@ function _item_row_html(item, idx, doc_currency) {
     html +=
         '<td><button type="button" class="item-delete" title="' + __("Remove line item") + '">&times;</button></td>';
 
+    html += '</tr>';
+
+    // Second row: item name + description get the full table width
+    var name_val = item["item_name"];
+    if (name_val === null || name_val === undefined) name_val = "";
+    var desc_val = item["description"];
+    if (desc_val === null || desc_val === undefined) desc_val = "";
+    html += '<tr class="item-text-row" data-item-text-idx="' + idx + '">';
+    html += '<td></td>';
+    html += '<td colspan="8"><div class="text-fields">' +
+        '<input type="text" class="review-input review-item-field item-name-input"' +
+        ' data-idx="' + idx + '" data-field="item_name"' +
+        ' placeholder="' + __("Item Name") + '" title="' + __("Item Name") + '"' +
+        ' value="' + frappe.utils.escape_html(String(name_val)) + '" />' +
+        '<input type="text" class="review-input review-item-field item-desc-input"' +
+        ' data-idx="' + idx + '" data-field="description"' +
+        ' placeholder="' + __("Description") + '" title="' + __("Description") + '"' +
+        ' value="' + frappe.utils.escape_html(String(desc_val)) + '" />' +
+        '</div></td>';
     html += '</tr>';
     return html;
 }
@@ -892,7 +909,7 @@ function _append_item_row(frm, wrapper) {
 
 // Keep the visible position numbers sequential after add/delete
 function _renumber_rows(wrapper) {
-    wrapper.find(".items-table tbody tr").each(function (i) {
+    wrapper.find(".items-table tbody tr.item-main-row").each(function (i) {
         $(this).find(".row-num").text(i + 1);
     });
 }
@@ -1175,8 +1192,10 @@ function _collect_review_data(frm) {
         // rows added in the UI have no base and start empty.
         var item = Object.assign({}, base_items[orig_idx] || {});
 
-        // Text fields (code, name, description)
-        $row.find(".review-item-field").each(function () {
+        // Text fields: supplier code in the main row, name + description in
+        // the companion text row below it.
+        var $pair = $row.add($row.next("tr.item-text-row"));
+        $pair.find(".review-item-field").each(function () {
             item[$(this).data("field")] = $(this).val();
         });
 
