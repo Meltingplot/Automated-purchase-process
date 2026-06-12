@@ -181,6 +181,21 @@ class TestCreatePurchaseReceipt:
         assert len(call_args["items"]) == 2
         mock_doc.insert.assert_called_with(ignore_permissions=True)
 
+    def test_pr_posts_on_delivery_date(self):
+        """PR posting_date = delivery date (set_posting_time keeps it)."""
+        _setup_mock_doc()
+        create_purchase_receipt(EXTRACTED_DATA, "ACME GmbH", SETTINGS, "JOB-001")
+        call_args = frappe_mock.get_doc.call_args[0][0]
+        assert call_args["posting_date"] == EXTRACTED_DATA["delivery_date"]
+        assert call_args["set_posting_time"] == 1
+
+    def test_pr_falls_back_to_document_date(self):
+        _setup_mock_doc()
+        data = {**EXTRACTED_DATA, "delivery_date": None}
+        create_purchase_receipt(data, "ACME GmbH", SETTINGS, "JOB-001")
+        call_args = frappe_mock.get_doc.call_args[0][0]
+        assert call_args["posting_date"] == EXTRACTED_DATA["document_date"]
+
     def test_pr_links_to_purchase_order(self):
         _setup_mock_doc()
         create_purchase_receipt(
@@ -279,3 +294,11 @@ class TestCreatePurchaseInvoice:
         create_purchase_invoice(data, "ACME GmbH", SETTINGS, "JOB-001")
         call_args = frappe_mock.get_doc.call_args[0][0]
         assert call_args["due_date"] >= call_args["posting_date"]
+
+    def test_pi_posts_on_invoice_date(self):
+        """PI posting_date = invoice (document) date (set_posting_time keeps it)."""
+        _setup_mock_doc()
+        create_purchase_invoice(EXTRACTED_DATA, "ACME GmbH", SETTINGS, "JOB-001")
+        call_args = frappe_mock.get_doc.call_args[0][0]
+        assert call_args["posting_date"] == EXTRACTED_DATA["document_date"]
+        assert call_args["set_posting_time"] == 1

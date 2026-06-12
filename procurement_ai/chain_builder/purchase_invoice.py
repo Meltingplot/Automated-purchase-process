@@ -68,7 +68,10 @@ def create_purchase_invoice(
         "doctype": "Purchase Invoice",
         "supplier": supplier,
         "company": settings.get("default_company"),
+        # Book on the invoice date. set_posting_time is required — without it
+        # ERPNext silently resets posting_date to today.
         "posting_date": doc_date,
+        "set_posting_time": 1,
         "due_date": due,
         "bill_no": extracted_data.get("document_number", ""),
         "bill_date": doc_date,

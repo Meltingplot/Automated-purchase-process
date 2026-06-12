@@ -48,12 +48,16 @@ def create_purchase_receipt(
 
     # Retrospective documents must not be dated later than the source document
     doc_date = extracted_data.get("document_date") or today()
+    # Book the receipt on the (reviewed) delivery date. set_posting_time is
+    # required — without it ERPNext silently resets posting_date to today.
+    posting_date = extracted_data.get("delivery_date") or doc_date
 
     pr_data = {
         "doctype": "Purchase Receipt",
         "supplier": supplier,
         "company": settings.get("default_company"),
-        "posting_date": doc_date,
+        "posting_date": posting_date,
+        "set_posting_time": 1,
         "ai_procurement_job": job_name,
         "items": items,
     }
