@@ -225,10 +225,12 @@ var _REVIEW_CSS = '<style>' +
     '.items-table th { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); padding: 6px 8px; border-bottom: 2px solid var(--border-color); }' +
     '.items-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-color); vertical-align: top; }' +
     '.items-table .review-input { padding: 2px 4px; }' +
-    '.stock-detail { display: none; margin-top: 4px; padding: 6px 8px; background: var(--subtle-fg); border-radius: 4px; }' +
-    '.stock-detail.open { display: flex; align-items: center; gap: 4px; }' +
-    '.stock-toggle { cursor: pointer; color: var(--text-muted); font-size: 0.8em; user-select: none; }' +
-    '.stock-toggle:hover { color: var(--text-color); }' +
+    '.stock-summary { cursor: pointer; margin-top: 2px; font-size: 0.85em; color: var(--text-muted); white-space: nowrap; user-select: none; }' +
+    '.stock-summary:hover { color: var(--text-color); }' +
+    '.stock-summary .stock-edit-icon { font-size: 0.85em; opacity: 0.6; }' +
+    '.stock-detail { display: none; margin-top: 2px; white-space: nowrap; }' +
+    '.stock-detail.open { display: flex; align-items: center; gap: 3px; }' +
+    '.uom-new-hint { display: none; margin-top: 2px; font-size: 0.75em; color: #d69e2e; white-space: nowrap; }' +
     // Theme-aware colors (work in dark mode, fall back to light-theme values)
     '.review-banner-warning { background: var(--bg-yellow, #fff3cd); border: 1px solid var(--yellow-300, #ffc107); color: var(--text-on-yellow, #856404); }' +
     '.review-banner-warning pre { color: inherit; }' +
@@ -459,11 +461,11 @@ function _render_review_ui(frm, options) {
     // Delegated events: survive dynamically added/removed rows and don't
     // stack across re-renders (namespaced off() first).
     wrapper.off(".reviewui");
-    wrapper.on("click.reviewui", ".stock-toggle", function () {
+    // Stock summary click → swap to the edit row (and back)
+    wrapper.on("click.reviewui", ".stock-summary", function () {
         var idx = $(this).data("idx");
         var $detail = wrapper.find('.stock-detail[data-idx="' + idx + '"]');
         $detail.toggleClass("open");
-        $(this).html($detail.hasClass("open") ? "&#9650;" : "&#9660;");
     });
     wrapper.on("change.reviewui", ".doc-qty", function () {
         frm.dirty();
@@ -706,27 +708,31 @@ function _item_row_html(item, idx, doc_currency) {
             ' value="' + frappe.utils.escape_html(String(val)) + '" /></td>';
     });
 
-    // Qty column with toggle for stock detail
+    // Qty column: doc qty input + compact stock summary (click to edit)
     html +=
         '<td class="qty-uom-cell" data-idx="' + idx + '"' +
         ' data-line-total="' + total + '" data-invoice-qty="' + qty + '"' +
         ' data-invoice-rate="' + rate + '" style="white-space:nowrap;">' +
-        '<div style="display:flex;align-items:center;gap:4px;">' +
         '<input type="number" class="review-input doc-qty" data-idx="' + idx + '"' +
-        ' step="any" style="width:70px;" value="' + qty + '" />' +
-        '<span class="stock-toggle" data-idx="' + idx + '" title="' + __("Stock details") + '">&#9660;</span>' +
+        ' step="any" style="width:56px;" value="' + qty + '" />' +
+        // Compact stock line: "= 200 Stk ✎" — click swaps to edit inputs
+        '<div class="stock-summary" data-idx="' + idx + '"' +
+        ' title="' + __("Edit stock quantity / unit") + '">' +
+        '<span class="stock-summary-text" data-idx="' + idx + '">= ' +
+        qty + " " + frappe.utils.escape_html(String(item_uom)) + '</span>' +
+        ' <span class="stock-edit-icon">&#9998;</span>' +
         '</div>' +
-        // Collapsible stock detail row
+        // Edit row (hidden until the summary is clicked)
         '<div class="stock-detail" data-idx="' + idx + '">' +
-        '<span style="font-size:0.85em;color:var(--text-muted);">' + __("Stock") + ':&nbsp;</span>' +
         '<input type="number" class="review-input stock-qty" data-idx="' + idx + '"' +
-        ' step="any" style="width:60px;" value="' + qty + '" />' +
+        ' step="any" style="width:56px;" value="' + qty + '" />' +
         '<div class="stock-uom-control" data-idx="' + idx + '"' +
         ' data-initial-value="' + frappe.utils.escape_html(String(item_uom)) + '"' +
-        ' style="display:inline-block;width:80px;"></div>' +
+        ' style="display:inline-block;width:90px;"></div>' +
         '<span class="qty-info" data-idx="' + idx + '"' +
         ' style="font-size:0.8em;color:var(--text-muted);"></span>' +
         '</div>' +
+        '<div class="uom-new-hint" data-idx="' + idx + '"></div>' +
         '<div class="qty-warning review-warning-text" data-idx="' + idx + '"' +
         ' style="display:none;font-size:0.8em;margin-top:2px;"></div>' +
         '</td>';
@@ -819,6 +825,7 @@ function _wire_row_controls(frm, wrapper, $scope) {
                 placeholder: __("Stock UOM"),
                 change: function () {
                     frm.dirty();
+                    _update_stock_summary(wrapper, idx);
                 },
             },
             parent: $el,
@@ -1023,6 +1030,13 @@ function _render_match_badges(wrapper, matches, frm) {
             $qty_cell.find('.doc-qty[data-idx="' + idx + '"]').val(adj.suggested_doc_qty);
             $qty_cell.find('.stock-qty[data-idx="' + idx + '"]').val(adj.original_qty);
             _recalc_qty_cell(wrapper, idx);
+        }
+
+        // Show a hint when the bulk UOM record will be auto-created
+        if (info.uom_will_be_created) {
+            wrapper.find('.uom-new-hint[data-idx="' + idx + '"]')
+                .text(__("Unit {0} will be created", [info.uom_will_be_created]))
+                .css("display", "block");
         }
     });
 }
@@ -1383,6 +1397,7 @@ function _set_stock_uom_readonly(wrapper, idx, stock_uom) {
         control.set_value(stock_uom);
         control.$input.prop("disabled", true);
         control.$input.css("background", "var(--subtle-fg)");
+        _update_stock_summary(wrapper, idx);
     }
 }
 
@@ -1482,9 +1497,26 @@ function _recalc_qty_cell(wrapper, idx) {
         $info.text("");
     }
 
+    _update_stock_summary(wrapper, idx);
+
     // Sub-cent validation
     _validate_rate(wrapper, idx, rate, line_total, doc_qty);
     _update_totals_check(wrapper);
+}
+
+// Refresh the compact "= 200 Stk" stock summary line from the edit inputs.
+function _update_stock_summary(wrapper, idx) {
+    var $cell = wrapper.find('.qty-uom-cell[data-idx="' + idx + '"]');
+    if (!$cell.length) return;
+
+    var stock_qty = parseFloat($cell.find(".stock-qty").val()) || 0;
+    var uom_ctrl = $cell.find(".stock-uom-control").data("control");
+    var uom = uom_ctrl ? (uom_ctrl.get_value() || "") : "";
+    if (!uom) uom = $cell.find(".stock-uom-control").data("initial-value") || "";
+
+    $cell.find('.stock-summary-text[data-idx="' + idx + '"]').text(
+        "= " + stock_qty + " " + uom
+    );
 }
 
 function _validate_rate(wrapper, idx, rate, total, current_left) {

@@ -318,6 +318,10 @@ class AIProcurementJob(Document):
                     "original_rate": rate / factor if factor else rate,
                     "adjusted_rate": rate,  # price per package
                 }
+                # Tell the UI when the bulk UOM record does not exist yet —
+                # it is auto-created at chain-build time.
+                if not frappe.db.exists("UOM", uom_raw):
+                    info["uom_will_be_created"] = uom_raw
             else:
                 uom = _resolve_uom(uom_raw)
                 info["resolved_uom"] = uom
