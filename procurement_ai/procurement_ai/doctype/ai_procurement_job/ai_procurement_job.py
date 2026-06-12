@@ -270,6 +270,8 @@ class AIProcurementJob(Document):
         # Check each item (try_resolve only, no creation) + UOM adjustment
         from ....chain_builder.purchase_order import (
             _adjust_bulk_uom,
+            _get_piece_uom,
+            _is_numeric_uom,
             _resolve_uom,
             _true_unit_price,
             _try_resolve_item,
@@ -287,7 +289,7 @@ class AIProcurementJob(Document):
             matched = _try_resolve_item(item, settings, supplier_name)
             qty = float(item.get("quantity", 1) or 1)
             rate = _true_unit_price(item, qty)
-            uom = _resolve_uom(item.get("uom", "Nos"))
+            uom_raw = str(item.get("uom") or "Nos")
 
             info = {
                 # Review-UI row index — sanitization may have removed rows
@@ -295,25 +297,43 @@ class AIProcurementJob(Document):
                 "idx": item.get("_orig_idx", pos),
                 "item_code": matched if matched else None,
                 "exists": bool(matched),
-                "resolved_uom": uom,
             }
 
             # Include stock UOM for existing items (can't be changed)
             if matched:
                 info["stock_uom"] = frappe.db.get_value("Item", matched, "stock_uom")
 
-            # Check if bulk UOM adjustment would apply
-            adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(
-                qty, rate, uom, item_code=matched, currency=invoice_currency,
-                dry_run=True,
-            )
-            if adj_uom != uom:
+            if _is_numeric_uom(uom_raw):
+                # Package line resolved to a numeric bulk UOM during
+                # sanitization ("1 VPE à 200 Stück" → uom "200"). The UOM
+                # record may not exist yet (it is created at chain-build
+                # time), so _resolve_uom would fall back to 1 piece here.
+                # Resolve to the piece UOM for the UI control and prefill
+                # the stock detail with the contained piece count instead.
+                factor = float(uom_raw)
+                info["resolved_uom"] = _get_piece_uom()
                 info["uom_adjustment"] = {
-                    "original_qty": qty,
-                    "suggested_doc_qty": adj_qty,
-                    "original_rate": rate,
-                    "adjusted_rate": adj_rate,
+                    "original_qty": qty * factor,  # pieces into stock
+                    "suggested_doc_qty": qty,  # packages on the document line
+                    "original_rate": rate / factor if factor else rate,
+                    "adjusted_rate": rate,  # price per package
                 }
+            else:
+                uom = _resolve_uom(uom_raw)
+                info["resolved_uom"] = uom
+
+                # Check if bulk UOM adjustment would apply
+                adj_qty, adj_rate, adj_uom = _adjust_bulk_uom(
+                    qty, rate, uom, item_code=matched, currency=invoice_currency,
+                    dry_run=True,
+                )
+                if adj_uom != uom:
+                    info["uom_adjustment"] = {
+                        "original_qty": qty,
+                        "suggested_doc_qty": adj_qty,
+                        "original_rate": rate,
+                        "adjusted_rate": adj_rate,
+                    }
 
             items_info.append(info)
 
