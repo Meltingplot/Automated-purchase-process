@@ -433,6 +433,10 @@ def sanitize_extracted_data(data: dict) -> dict:
     else:
         clean["items"] = []
 
+    # Convert gross line prices to net when the items sum only matches the
+    # (net) subtotal after removing each row's VAT share.
+    _convert_gross_lines_to_net(clean)
+
     # Remove shipping line items when shipping_cost is already a separate field,
     # to avoid double-counting (once as item row, once as tax charge).
     if clean["shipping_cost"] and clean["shipping_cost"] > 0:
@@ -471,6 +475,49 @@ def sanitize_extracted_data(data: dict) -> dict:
         _apply_package_uom(item)
 
     return clean
+
+
+def _convert_gross_lines_to_net(clean: dict) -> None:
+    """Detect gross-priced line items and convert them to net in place.
+
+    Some documents list line items gross (incl. VAT) while the extracted
+    subtotal is net. When the items sum differs from the subtotal but matches
+    it after removing each row's VAT share, every row is converted with its
+    own tax rate (total_price and unit_price). Already-net documents and
+    differences that are not explained by VAT are left untouched.
+    """
+    subtotal = clean.get("subtotal")
+    items = clean.get("items") or []
+    if not subtotal or not items:
+        return
+
+    gross_sum = 0.0
+    net_sum = 0.0
+    for item in items:
+        total = item.get("total_price") or 0
+        rate = item.get("tax_rate") or 0
+        gross_sum += total
+        net_sum += total / (1 + rate / 100.0)
+
+    # Per-row rounding leeway (line totals are rounded to cents)
+    tolerance = 0.02 * len(items) + 0.02
+    if abs(gross_sum - subtotal) <= tolerance:
+        return  # items already net
+    if abs(net_sum - subtotal) > tolerance:
+        return  # difference is not (just) the VAT share — leave for review
+
+    for item in items:
+        rate = item.get("tax_rate") or 0
+        factor = 1 + rate / 100.0
+        if factor == 1:
+            continue
+        item["total_price"] = round((item.get("total_price") or 0) / factor, 2)
+        item["unit_price"] = round((item.get("unit_price") or 0) / factor, 4)
+
+    logger.info(
+        f"Converted {len(items)} gross line items to net "
+        f"(items sum {gross_sum:.2f} → net {net_sum:.2f}, subtotal {subtotal:.2f})"
+    )
 
 
 # Package-type transaction UOMs (Verpackungseinheiten). These carry no piece

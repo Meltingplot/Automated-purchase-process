@@ -615,3 +615,84 @@ class TestPackageUom:
         for name, desc, expected_uom in cases:
             result = _sanitize_single(_vpe_item(item_name=name, description=desc))
             assert result["uom"] == expected_uom, f"{name}: got {result['uom']}"
+
+
+# ============================================================
+# Gross → net line item conversion
+# ============================================================
+
+
+def _gross_data(items, subtotal, **kw):
+    data = copy.deepcopy(SAMPLE_DATA)
+    data["items"] = items
+    data["subtotal"] = subtotal
+    data.update(kw)
+    return data
+
+
+def _line(name, total, rate=19, qty=1):
+    return {
+        "item_name": name,
+        "quantity": qty,
+        "uom": "Stk",
+        "unit_price": total / qty,
+        "total_price": total,
+        "tax_rate": rate,
+    }
+
+
+class TestGrossToNetConversion:
+    def test_gross_lines_converted_with_row_rate(self):
+        # 119.00 gross @19% → 100.00 net subtotal
+        result = sanitize_extracted_data(
+            _gross_data([_line("Schrauben", 119.0)], subtotal=100.0)
+        )
+        item = result["items"][0]
+        assert item["total_price"] == 100.0
+        assert item["unit_price"] == 100.0
+
+    def test_mixed_tax_rates_converted_per_row(self):
+        # 119 @19% → 100, 107 @7% → 100 ⇒ subtotal 200 net
+        items = [_line("A", 119.0, rate=19), _line("B", 107.0, rate=7)]
+        result = sanitize_extracted_data(_gross_data(items, subtotal=200.0))
+        assert result["items"][0]["total_price"] == 100.0
+        assert result["items"][1]["total_price"] == 100.0
+
+    def test_net_lines_left_unchanged(self):
+        result = sanitize_extracted_data(
+            _gross_data([_line("Schrauben", 100.0)], subtotal=100.0)
+        )
+        assert result["items"][0]["total_price"] == 100.0
+
+    def test_unexplained_difference_left_unchanged(self):
+        # 150 vs subtotal 100 — not a VAT share, leave for human review
+        result = sanitize_extracted_data(
+            _gross_data([_line("Schrauben", 150.0)], subtotal=100.0)
+        )
+        assert result["items"][0]["total_price"] == 150.0
+
+    def test_no_subtotal_no_conversion(self):
+        result = sanitize_extracted_data(
+            _gross_data([_line("Schrauben", 119.0)], subtotal=None)
+        )
+        assert result["items"][0]["total_price"] == 119.0
+
+    def test_rounding_tolerance_per_row(self):
+        # Three rows with cent rounding: 11.90 + 5.95 + 2.38 = 20.23 gross
+        # net: 10.00 + 5.00 + 2.00 = 17.00
+        items = [
+            _line("A", 11.90), _line("B", 5.95), _line("C", 2.38),
+        ]
+        result = sanitize_extracted_data(_gross_data(items, subtotal=17.0))
+        assert result["items"][0]["total_price"] == 10.0
+        assert result["items"][1]["total_price"] == 5.0
+        assert result["items"][2]["total_price"] == 2.0
+
+    def test_gross_shipping_row_converted_then_extracted(self):
+        # Gross rows incl. shipping row; shipping_cost set → row removed
+        items = [_line("Schrauben", 119.0), _line("Versandkosten DHL", 5.95)]
+        data = _gross_data(items, subtotal=105.0, shipping_cost=5.0)
+        result = sanitize_extracted_data(data)
+        names = [i["item_name"] for i in result["items"]]
+        assert "Versandkosten DHL" not in names
+        assert result["items"][0]["total_price"] == 100.0
