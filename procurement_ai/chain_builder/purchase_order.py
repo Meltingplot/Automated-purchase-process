@@ -1187,8 +1187,15 @@ def _create_item(item: dict, supplier: str, settings: dict, stock_uom: str | Non
     item_desc = _sanitize_text(item.get("description", item_name), max_len=500)
     item_code = _sanitize_code(item.get("item_code", ""))
     uom = _resolve_uom(item.get("uom") or "")
-    # Use user-specified stock UOM if provided, otherwise default to transaction UOM
-    effective_stock_uom = _resolve_uom(stock_uom) if stock_uom else uom
+    # Use user-specified stock UOM if provided, otherwise default to the
+    # transaction UOM — except for numeric bulk UOMs ("1000"): stock is always
+    # kept in pieces, the numeric UOM only scales the transaction line.
+    if stock_uom:
+        effective_stock_uom = _resolve_uom(stock_uom)
+    elif _is_numeric_uom(uom):
+        effective_stock_uom = _get_piece_uom()
+    else:
+        effective_stock_uom = uom
 
     # item_code is mandatory in ERPNext. Generate a unique SKU to avoid
     # collisions — neither the supplier's part number nor item_name are

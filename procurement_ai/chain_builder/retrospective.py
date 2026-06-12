@@ -465,7 +465,74 @@ def sanitize_extracted_data(data: dict) -> dict:
     else:
         clean["surcharge_amount"] = None
 
+    # Resolve package UOMs (VPE/Pack/Karton/...) into numeric bulk UOMs so the
+    # stock booking reflects the real piece count (1 VPE à 1000 → UOM "1000").
+    for item in clean["items"]:
+        _apply_package_uom(item)
+
     return clean
+
+
+# Package-type transaction UOMs (Verpackungseinheiten). These carry no piece
+# count by themselves — the content is stated in the item name/description
+# ("1000 Stück") or extracted by the LLM as pack_size.
+_PACKAGE_UOM_ALIASES = {
+    "vpe", "ve", "pack", "pack.", "paket", "pkg", "package",
+    "karton", "box", "gebinde", "set", "satz",
+}
+
+# "1000 Stück", "(100 Stück)", "100 Stk.", "à 50", "50 Schrauben", "200 pcs"
+_PACK_SIZE_RE = re.compile(
+    r"(?:à|je)\s*(\d{1,6})\b"
+    r"|(\d{1,6})\s*(?:stück|stck|stk\.?|st\.|pcs|pieces|teile|schrauben|muttern|scheiben)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_pack_size(item: dict) -> float | None:
+    """Infer the package content from item name/description text.
+
+    Fallback for extractions without an explicit pack_size field, e.g.
+    "Linsenkopfschrauben ... - 1000 Stück" → 1000.
+    """
+    text = f"{item.get('item_name') or ''} {item.get('description') or ''}"
+    match = _PACK_SIZE_RE.search(text)
+    if not match:
+        return None
+    value = float(match.group(1) or match.group(2))
+    return value if value > 0 else None
+
+
+def _apply_package_uom(item: dict) -> None:
+    """Convert a package UOM (VPE/Pack/...) into a numeric bulk UOM in place.
+
+    A line of "1 VPE à 7.10" containing 1000 pieces becomes uom "1000" with
+    unchanged qty/price. The chain builders' existing numeric-UOM machinery
+    (`_ensure_numeric_uom_setup`) then creates the UOM + conversion factor,
+    so ERPNext books qty × pack_size pieces into stock while the line keeps
+    the per-package price. Without a known pack size the UOM is left as-is
+    (resolves to the piece UOM downstream, the previous behaviour).
+    """
+    uom = (item.get("uom") or "").strip().lower()
+    if uom in _PACKAGE_UOM_ALIASES:
+        # Package UOM: trust explicit pack_size, else parse it from the text.
+        pack_size = item.get("pack_size") or _parse_pack_size(item)
+    elif item.get("pack_size"):
+        # Piece/other UOM with an explicit LLM pack_size (unit column said
+        # "Stk" but the description said "1000 Stück pro VPE"). Never text-
+        # parse here — "100 Schrauben" with qty 100 would multiply to 10000.
+        # Guard: pack_size == quantity means the LLM echoed the piece count.
+        pack_size = item["pack_size"]
+        if pack_size == item.get("quantity"):
+            return
+    else:
+        return
+
+    if not pack_size or pack_size <= 1 or pack_size != int(pack_size):
+        return
+
+    item["pack_size"] = float(pack_size)
+    item["uom"] = str(int(pack_size))
 
 
 def _convert_to_company_currency(data: dict, settings: dict) -> dict:
@@ -613,6 +680,7 @@ def _sanitize_line_item(item: dict) -> dict:
         "description": _clean_text(item.get("description", ""), max_len=500),
         "quantity": _clean_numeric(item.get("quantity")) or 1,
         "uom": _clean_text(item.get("uom", ""), max_len=20),
+        "pack_size": _clean_numeric(item.get("pack_size")),
         "unit_price": _clean_numeric(item.get("unit_price")) or 0,
         "total_price": _clean_numeric(item.get("total_price")) or 0,
         "tax_rate": _clean_numeric(item.get("tax_rate")),

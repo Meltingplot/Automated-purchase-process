@@ -21,6 +21,15 @@ class LineItem(BaseModel):
     description: str | None = None
     quantity: Decimal
     uom: str = "Stk"
+    pack_size: Decimal | None = Field(
+        default=None,
+        description=(
+            "Number of base units contained in ONE package when the line is "
+            'sold in a package UOM (VPE, Pack, Karton, Box, Gebinde). Example: '
+            'uom "VPE" with "1000 Stück" in the description → pack_size: 1000. '
+            "null when uom is already a base unit (Stk, kg, m)."
+        ),
+    )
     unit_price: Decimal
     total_price: Decimal
     tax_rate: Decimal | None = None

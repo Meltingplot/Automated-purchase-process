@@ -493,3 +493,125 @@ class TestSanitizeExtractedData:
         assert result["currency"] == "EUR"
         assert result["document_type"] == "invoice"
         assert result["items"] == []
+
+
+# ============================================================
+# Package UOM (VPE) → numeric bulk UOM
+# ============================================================
+
+
+def _vpe_item(**overrides):
+    item = {
+        "item_name": "Linsenkopfschrauben ISO 7380 - M3x12",
+        "description": "Linsenkopf - Innensechskant - A2 - 1000 Stück",
+        "quantity": 1,
+        "uom": "VPE",
+        "unit_price": 7.10,
+        "total_price": 7.10,
+        "tax_rate": 19,
+        "item_type": "stock",
+    }
+    item.update(overrides)
+    return item
+
+
+def _sanitize_single(item: dict) -> dict:
+    data = copy.deepcopy(SAMPLE_DATA)
+    data["items"] = [item]
+    return sanitize_extracted_data(data)["items"][0]
+
+
+class TestPackageUom:
+    def test_vpe_with_explicit_pack_size(self):
+        result = _sanitize_single(_vpe_item(pack_size=1000))
+        assert result["uom"] == "1000"
+        assert result["pack_size"] == 1000.0
+        assert result["quantity"] == 1
+        assert result["unit_price"] == 7.10
+
+    def test_vpe_pack_size_parsed_from_description(self):
+        # No explicit pack_size — fallback parses "1000 Stück" from the text
+        result = _sanitize_single(_vpe_item())
+        assert result["uom"] == "1000"
+        assert result["pack_size"] == 1000.0
+
+    def test_vpe_pack_size_parsed_from_item_name(self):
+        item = _vpe_item(
+            item_name="DIN 603 Schlossschrauben A2 - M10x260 - 10 Stück",
+            description=None,
+        )
+        result = _sanitize_single(item)
+        assert result["uom"] == "10"
+
+    def test_vpe_pack_size_in_parentheses(self):
+        item = _vpe_item(
+            item_name="EN 1663 8 galvanisch verzinkt",
+            description="Sechskantmuttern mit Klemmteil - Abmessung: M 10 (100 Stück)",
+        )
+        result = _sanitize_single(item)
+        assert result["uom"] == "100"
+
+    def test_vpe_without_pack_info_left_unchanged(self):
+        item = _vpe_item(item_name="Schrauben Sortiment", description="diverse Größen")
+        result = _sanitize_single(item)
+        assert result["uom"] == "VPE"  # downstream resolves to piece UOM
+        assert result["pack_size"] is None
+
+    def test_piece_uom_with_explicit_pack_size(self):
+        # Unit column said "Stk" but LLM extracted "1000 Stück pro VPE"
+        item = _vpe_item(uom="Stk", pack_size=1000)
+        result = _sanitize_single(item)
+        assert result["uom"] == "1000"
+
+    def test_piece_uom_pack_size_equal_quantity_skipped(self):
+        # "100 Schrauben" with qty 100: pack_size echoes the piece count
+        item = _vpe_item(
+            item_name="Schrauben M8x50",
+            description="100 Schrauben",
+            quantity=100,
+            uom="Stk",
+            pack_size=100,
+        )
+        result = _sanitize_single(item)
+        assert result["uom"] == "Stk"
+
+    def test_piece_uom_never_text_parsed(self):
+        # No explicit pack_size on a piece UOM → no text parsing
+        item = _vpe_item(uom="Stk", quantity=100, description="100 Schrauben verzinkt")
+        result = _sanitize_single(item)
+        assert result["uom"] == "Stk"
+        assert result["pack_size"] is None
+
+    def test_pack_size_one_left_unchanged(self):
+        result = _sanitize_single(_vpe_item(pack_size=1, description="1 Stück"))
+        assert result["uom"] == "VPE"
+
+    def test_fractional_pack_size_skipped(self):
+        result = _sanitize_single(_vpe_item(pack_size=2.5))
+        # falls back to text parsing? No: explicit pack_size given but invalid
+        assert result["uom"] == "VPE"
+
+    def test_a_notation_parsed(self):
+        item = _vpe_item(description="Karton à 50", uom="Karton", pack_size=None)
+        result = _sanitize_single(item)
+        assert result["uom"] == "50"
+
+    def test_case_insensitive_aliases(self):
+        for alias in ("vpe", "VPE", "Pack", "KARTON", "Gebinde", "Box"):
+            result = _sanitize_single(_vpe_item(uom=alias, pack_size=200))
+            assert result["uom"] == "200", f"alias {alias} failed"
+
+    def test_full_machholz_invoice(self):
+        """All 7 lines of the real Schraubenhandel Machholz invoice."""
+        cases = [
+            ("Linsenkopfschrauben ISO 7380 - M3x12", "Linsenkopf - Innensechskant - A2 - 1000 Stück", "1000"),
+            ("Linsenkopfschrauben ISO 7380 - M3x18", "Linsenkopf - Innensechskant - A2 - 1000 Stück", "1000"),
+            ("DIN 603 Schlossschrauben A2 - M10x260 - 10 Stück", None, "10"),
+            ("EN 1663 8 galvanisch verzinkt", "Sechskantmuttern mit Klemmteil und Flansch, mit nichtmetallischem Einsatz - Abmessung: M 10 (100 Stück)", "100"),
+            ("Zylinderschraube DIN 912 - M4x14", "Zylinderkopf - ISK - A2 - 200 Stück", "200"),
+            ("Linsenkopfschrauben ISO 7380 - M5x80", "Linsenkopf - Innensechskant - A2 - 100 Stück", "100"),
+            ("Zylinderschrauben DIN 7984 - M3x30", "niedriger Kopf - Innensechskant - A2 - 100 Stück", "100"),
+        ]
+        for name, desc, expected_uom in cases:
+            result = _sanitize_single(_vpe_item(item_name=name, description=desc))
+            assert result["uom"] == expected_uom, f"{name}: got {result['uom']}"
