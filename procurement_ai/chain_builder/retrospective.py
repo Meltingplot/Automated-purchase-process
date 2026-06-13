@@ -480,11 +480,21 @@ def sanitize_extracted_data(data: dict) -> dict:
 def _convert_gross_lines_to_net(clean: dict) -> None:
     """Detect gross-priced line items and convert them to net in place.
 
-    Some documents list line items gross (incl. VAT) while the extracted
-    subtotal is net. When the items sum differs from the subtotal but matches
-    it after removing each row's VAT share, every row is converted with its
-    own tax rate (total_price and unit_price). Already-net documents and
-    differences that are not explained by VAT are left untouched.
+    Two gross layouts are handled:
+
+    * **Lines gross, subtotal net** — the items sum differs from the subtotal
+      but matches it after removing each row's VAT share. Only the lines are
+      converted (the subtotal is already net).
+    * **Fully gross** — lines, subtotal *and* total are all gross (incl. VAT),
+      so the items already equal the subtotal and the grand total is
+      ``subtotal + shipping`` with the tax contained rather than added on top.
+      The lines and the subtotal are converted to net, and a gross shipping
+      field is reduced by its VAT share so the ``On Previous Row Total`` VAT
+      charge recomputes the same grand total.
+
+    Each row is converted with its own tax rate (total_price and unit_price).
+    Already-net documents and differences that are not explained by VAT are
+    left untouched.
     """
     subtotal = clean.get("subtotal")
     items = clean.get("items") or []
@@ -501,10 +511,31 @@ def _convert_gross_lines_to_net(clean: dict) -> None:
 
     # Per-row rounding leeway (line totals are rounded to cents)
     tolerance = 0.02 * len(items) + 0.02
-    if abs(gross_sum - subtotal) <= tolerance:
-        return  # items already net
-    if abs(net_sum - subtotal) > tolerance:
-        return  # difference is not (just) the VAT share — leave for review
+    items_vat = gross_sum - net_sum
+
+    convert_subtotal = False
+    convert_shipping = False
+    if abs(gross_sum - subtotal) > tolerance:
+        # Lines gross, subtotal net: only convert when the gap is the VAT share.
+        if abs(net_sum - subtotal) > tolerance:
+            return  # difference is not (just) the VAT share — leave for review
+    else:
+        # Lines already match the subtotal — but both may still be gross.
+        # A fully-gross document's grand total contains the tax rather than
+        # adding it: total ≈ subtotal + shipping, not subtotal + tax + shipping.
+        total = clean.get("total_amount")
+        tax = clean.get("tax_amount") or 0
+        shipping = clean.get("shipping_cost") or 0
+        if not total or tax <= 0 or items_vat <= tolerance:
+            return  # net document, or no VAT share to remove
+        doc_tol = 0.02 * len(items) + 0.05
+        gross_total_ok = abs(subtotal + shipping - total) <= doc_tol
+        net_total_ok = abs(subtotal + tax + shipping - total) <= doc_tol
+        if not gross_total_ok or net_total_ok:
+            return  # total adds the tax (net document) — leave untouched
+        convert_subtotal = True
+        # Shipping is gross too when the tax exceeds the lines' VAT share.
+        convert_shipping = bool(shipping) and (tax - items_vat) > tolerance
 
     for item in items:
         rate = item.get("tax_rate") or 0
@@ -514,9 +545,17 @@ def _convert_gross_lines_to_net(clean: dict) -> None:
         item["total_price"] = round((item.get("total_price") or 0) / factor, 2)
         item["unit_price"] = round((item.get("unit_price") or 0) / factor, 4)
 
+    if convert_subtotal:
+        clean["subtotal"] = round(net_sum, 2)
+    if convert_shipping:
+        shipping = clean.get("shipping_cost") or 0
+        shipping_vat = (clean.get("tax_amount") or 0) - items_vat
+        clean["shipping_cost"] = round(max(shipping - shipping_vat, 0.0), 2)
+
     logger.info(
         f"Converted {len(items)} gross line items to net "
-        f"(items sum {gross_sum:.2f} → net {net_sum:.2f}, subtotal {subtotal:.2f})"
+        f"(items sum {gross_sum:.2f} → net {net_sum:.2f}, subtotal {subtotal:.2f}"
+        f"{', subtotal+shipping netted' if convert_subtotal else ''})"
     )
 
 

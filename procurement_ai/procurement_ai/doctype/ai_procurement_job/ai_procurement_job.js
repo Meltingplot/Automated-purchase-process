@@ -1015,12 +1015,16 @@ function _sync_shipping_rows_to_field(wrapper) {
     return true;
 }
 
-// Detect gross-priced rows (items sum matches the net subtotal only after
-// removing each row's VAT share) and convert them to net in place.
+// Detect gross-priced rows and convert them to net in place. Two layouts:
+//   * lines gross, subtotal net — items match the subtotal only after
+//     removing each row's VAT share (subtotal stays as-is);
+//   * fully gross — lines, subtotal and total all incl. VAT, so the grand
+//     total is subtotal + shipping (tax contained, not added). The subtotal
+//     and a gross shipping field are netted too. Mirrors
+//     _convert_gross_lines_to_net in retrospective.py.
 function _maybe_convert_gross_rows(wrapper) {
-    var subtotal = parseFloat(
-        wrapper.find('.review-field[data-field="subtotal"]').val()
-    );
+    var $subtotal = wrapper.find('.review-field[data-field="subtotal"]');
+    var subtotal = parseFloat($subtotal.val());
     if (!subtotal) return;
 
     var rows = [];
@@ -1037,8 +1041,33 @@ function _maybe_convert_gross_rows(wrapper) {
     });
 
     var tol = 0.02 * rows.length + 0.02;
-    if (Math.abs(gross - subtotal) <= tol) return;   // already net
-    if (Math.abs(net - subtotal) > tol) return;      // not a pure VAT delta
+    var items_vat = gross - net;
+    var convert_subtotal = false;
+    var convert_shipping = false;
+
+    if (Math.abs(gross - subtotal) > tol) {
+        if (Math.abs(net - subtotal) > tol) return;  // not a pure VAT delta
+    } else {
+        // Lines already match the subtotal — both may still be gross.
+        var fld = function (key) {
+            var v = wrapper.find('.review-field[data-field="' + key + '"]').val();
+            return v === "" || v === undefined || v === null ? null : parseFloat(v);
+        };
+        var total = fld("total_amount");
+        var tax = fld("tax_amount") || 0;
+        var shipping = fld("shipping_cost") || 0;
+        if (!total || tax <= 0 || items_vat <= tol) return;
+        var doc_tol = 0.02 * rows.length + 0.05;
+        var gross_total_ok = Math.abs(subtotal + shipping - total) <= doc_tol;
+        var net_total_ok = Math.abs(subtotal + tax + shipping - total) <= doc_tol;
+        if (!gross_total_ok || net_total_ok) return;
+        convert_subtotal = true;
+        // Shipping is gross too when the tax exceeds the lines' VAT share.
+        // A shipping item row is netted via its own line, so only touch the
+        // standalone shipping field.
+        convert_shipping =
+            !!shipping && (tax - items_vat) > tol && !_get_shipping_rows(wrapper).length;
+    }
 
     rows.forEach(function (r) {
         var factor = 1 + r.rate / 100;
@@ -1047,6 +1076,16 @@ function _maybe_convert_gross_rows(wrapper) {
         r.$cell.data("line-total", new_total);
         _recalc_qty_cell(wrapper, r.$cell.data("idx"));
     });
+
+    if (convert_subtotal) {
+        $subtotal.val(Math.round(net * 100) / 100);
+    }
+    if (convert_shipping) {
+        var $ship = wrapper.find('.review-field[data-field="shipping_cost"]');
+        var ship_gross = parseFloat($ship.val()) || 0;
+        var ship_vat = (parseFloat(wrapper.find('.review-field[data-field="tax_amount"]').val()) || 0) - items_vat;
+        $ship.val(Math.round(Math.max(ship_gross - ship_vat, 0) * 100) / 100);
+    }
 
     wrapper.find(".gross-net-notice").remove();
     wrapper.find(".totals-check").after(
@@ -1095,9 +1134,12 @@ function _update_totals_check(wrapper) {
         var base = subtotal !== null ? subtotal : sum;
         // Shipping carried by an item row is already inside the items sum /
         // subtotal — adding the shipping field again would double-count it.
-        var net_total = base + (tax || 0) + (shipping_in_items ? 0 : (shipping || 0));
+        var ship_add = shipping_in_items ? 0 : (shipping || 0);
+        var net_total = base + (tax || 0) + ship_add;
         var net_ok = Math.abs(net_total - total) <= 0.02;
-        var gross_ok = Math.abs(base - total) <= 0.02;
+        // Gross-style: tax is contained in the lines, so the total is just
+        // subtotal (+ shipping) without adding the tax on top.
+        var gross_ok = Math.abs(base + ship_add - total) <= 0.02;
         if (!net_ok && !gross_ok) {
             parts.push(
                 '<span class="review-warning-text">' +

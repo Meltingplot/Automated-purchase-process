@@ -696,3 +696,51 @@ class TestGrossToNetConversion:
         names = [i["item_name"] for i in result["items"]]
         assert "Versandkosten DHL" not in names
         assert result["items"][0]["total_price"] == 100.0
+
+    def test_fully_gross_document_converted(self):
+        # Whole document is gross: line, subtotal and total all incl. VAT.
+        # Real Alphacool invoice: 229.96 gross @19%, +6.99 gross shipping,
+        # tax 37.84 contained, total 236.95 = subtotal + shipping.
+        data = _gross_data(
+            [_line("Alphacool Core 200", 229.96, qty=2)],
+            subtotal=229.96,
+            tax_amount=37.84,
+            shipping_cost=6.99,
+            total_amount=236.95,
+        )
+        result = sanitize_extracted_data(data)
+        # Line + subtotal netted (229.96 / 1.19 = 193.24)
+        assert result["items"][0]["total_price"] == 193.24
+        assert result["subtotal"] == 193.24
+        # Shipping reduced by its VAT share (6.99 → ~5.87) so the VAT charge
+        # recomputes the same 236.95 grand total
+        assert result["shipping_cost"] == 5.87
+        # total_amount (gross grand total) and tax_amount are left as-is
+        assert result["total_amount"] == 236.95
+        assert result["tax_amount"] == 37.84
+
+    def test_fully_gross_no_shipping(self):
+        # 119 gross @19%, total 119 (tax 19 contained, no shipping)
+        data = _gross_data(
+            [_line("Schrauben", 119.0)],
+            subtotal=119.0,
+            tax_amount=19.0,
+            shipping_cost=0.0,
+            total_amount=119.0,
+        )
+        result = sanitize_extracted_data(data)
+        assert result["items"][0]["total_price"] == 100.0
+        assert result["subtotal"] == 100.0
+
+    def test_net_document_with_additive_total_unchanged(self):
+        # Net document: total adds the tax (119 = 100 + 19), leave untouched
+        data = _gross_data(
+            [_line("Schrauben", 100.0)],
+            subtotal=100.0,
+            tax_amount=19.0,
+            shipping_cost=0.0,
+            total_amount=119.0,
+        )
+        result = sanitize_extracted_data(data)
+        assert result["items"][0]["total_price"] == 100.0
+        assert result["subtotal"] == 100.0
