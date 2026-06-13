@@ -129,6 +129,16 @@ jobs:
           mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL character_set_server = 'utf8mb4'"
           mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
 
+      - name: Fix TLS stack (pyOpenSSL/cryptography compatibility)
+        working-directory: /home/runner/frappe-bench
+        # cryptography>=42 removed the GEN_* FFI bindings that pyOpenSSL<23.2.0
+        # references at import time. When a newer cryptography wheel is resolved
+        # into the bench env, the old pyOpenSSL crashes on import via
+        # botocore -> urllib3.contrib.pyopenssl -> OpenSSL.crypto
+        # ("module 'lib' has no attribute 'GEN_EMAIL'"). Upgrade pyOpenSSL to a
+        # version matching the installed cryptography.
+        run: ./env/bin/pip install --upgrade "pyOpenSSL>=23.2.0"
+
       - name: Install apps and create site
         working-directory: /home/runner/frappe-bench
         run: |
