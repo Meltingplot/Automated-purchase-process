@@ -157,7 +157,7 @@ All chain builders dynamically query defaults instead of hardcoding names:
 | Item Group | `Stock Settings.item_group` | First non-group Item Group |
 | Warehouse | `Company.default_warehouse` | First non-group Warehouse (filtered by company) |
 | Expense Account | `Company.default_expense_account` | `account_type="Cost of Goods Sold"` → `"Expense Account"` → any non-group Expense account |
-| Tax Account | Default Purchase Taxes and Charges Template (rate-matched row, prefer `root_type="Asset"` / Vorsteuer) | Any company template (rate-matched, Vorsteuer-preferred); None if no match (skips row) |
+| Tax Template / Category | Tax Rule via `erpnext.accounts.party.set_taxes` (supplier `tax_category` + `supplier_group`) → sets `taxes_and_charges` + `tax_category` | None — VAT still comes from the per-item Item Tax Templates (see Tax Handling) |
 
 All throw clear errors if no fallback exists.
 
@@ -171,7 +171,7 @@ The LLM classifies each line item as `item_type: "stock"` (physical goods) or `"
 
 - **Shipping items** — removed from the items list when `shipping_cost` is already set (avoids double-counting). Detected by keywords (versand, shipping, freight, dhl, dpd, ups, etc.) via `_is_shipping_item()`.
 - **Discount items** (Rabatt/Skonto/Vorkasserabatt) — removed from the items list and summed into `discount_amount`. Detected by keyword AND negative `total_price` via `_is_discount_item()`. Applied as document-level `discount_amount` with `apply_discount_on: "Net Total"` on PO/PR/PI, so it reduces the invoiced amount without affecting individual item rates or warehouse stock values.
-- **Surcharge items** (Mindermengenaufschlag/Kleinmengenzuschlag) — removed from items list and summed into `surcharge_amount`. Detected by keyword via `_is_surcharge_item()`. Applied as "Actual" charge in `_build_taxes()` (like shipping), so it increases item cost proportionally.
+- **Surcharge items** (Mindermengenaufschlag/Kleinmengenzuschlag) — removed from items list and summed into `surcharge_amount`. Detected by keyword via `_is_surcharge_item()`. Applied as "Actual" charge in `_build_charge_rows()` (like shipping), so it increases item cost proportionally.
 
 ### Item Code Consistency Across Chain
 
@@ -183,9 +183,13 @@ German UOM aliases from LLM output are mapped to ERPNext standard UOMs (`_resolv
 
 ### Tax Handling
 
-PO, PR and PI include `Purchase Taxes and Charges` rows (`_build_taxes()`) built from the per-item `tax_rate` extracted by the LLM. Tax account is resolved from the company's default Purchase Taxes and Charges Template, falling back to the first Tax-type account.
+**VAT is delegated to ERPNext** — procurement_ai no longer builds VAT rows from the per-item `tax_rate`. Each Item carries a (generic) **Item Tax Template** at the Item-master level; on `insert()` ERPNext's `set_missing_item_details` fills `item_tax_rate` per line, `set_taxes_and_charges` adds one `On Net Total` tax row per VAT account (`set_by_item_tax_template=1`, **rate 0**), and `calculate_taxes_and_totals` computes the real per-item tax. The summary tax row legitimately shows **rate 0** while `tax_amount` is correct — this is standard ERPNext behavior with Item Tax Templates, not a bug.
 
-Shipping (Versandkosten) and surcharge (Mindermengenaufschlag) are added as `charge_type="Actual"` rows with `category="Valuation and Total"` — these **Bezugsnebenkosten** must hit stock valuation (landed cost), not just the document total, so the received stock value is correct. VAT rows keep the default `category` ("Total") and reference the shipping row via `On Previous Row Total` when present.
+`_apply_tax_template()` (in `purchase_order.py`, reused by PR/PI) only drives the *selection*: it copies the supplier's `tax_category` onto the document and resolves the Purchase Taxes and Charges Template via the Tax Rule (`erpnext.accounts.party.set_taxes`), recording it on `taxes_and_charges`. Failure (no Tax Rule / erpnext unavailable) is non-fatal — VAT still comes from the Item Tax Templates.
+
+> **Why not pre-build the taxes table?** `set_taxes_and_charges` early-returns if `taxes` is already populated, so pre-filling VAT rows (the old `_build_taxes`) blocked ERPNext's per-item computation and left `rate=0` with no tax. The fix: leave `taxes` empty at insert, then append our charge rows afterwards (see below).
+
+Shipping (Versandkosten) and surcharge (Mindermengenaufschlag) are **Bezugsnebenkosten** added by `_build_charge_rows()` as `charge_type="Actual"`, `category="Valuation and Total"` rows so they hit stock valuation (landed cost), not just the total. `_finalize_charges()` appends them to the doc **after `insert()`** and calls `save()` to recompute — appending before insert would block ERPNext's VAT auto-population. They are not VAT'd (Item Tax Templates only apply to item rows); add an explicit tax row if shipping must carry VAT.
 
 ### LLM Amount Convention
 
@@ -249,7 +253,7 @@ LangGraph, LangChain (anthropic/openai/google-genai), pdfplumber, pytesseract, e
 - Item matching logic lives in `purchase_order._resolve_item()` and is reused by all three chain builders via import
 - UOM resolution lives in `purchase_order._resolve_uom()` and is reused by all three chain builders via import
 - New items are created with `delivered_by_supplier=1` and linked to the supplier via `supplier_items` child table. `is_stock_item` is set based on `item_type` ("service" → 0, else → 1)
-- LLM extraction uses NET amounts; tax is added separately via `Purchase Taxes and Charges` rows on PO/PI
+- LLM extraction uses NET amounts; VAT is computed by ERPNext from the per-item Item Tax Templates (we only set `tax_category`/`taxes_and_charges`), and shipping/surcharge charges are appended after insert (see Tax Handling)
 - PR/PI builders must use `item_code` from `po_item_links`/`pr_item_links` when available — never re-resolve independently
 - Shipping and discount line items are extracted into document-level fields during sanitization, not kept as item rows
 - Phone numbers: `_clean_phone()` replaces `/` with space (German area/number format with `/` is rejected by Frappe)

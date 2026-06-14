@@ -98,10 +98,9 @@ def create_purchase_order(
     if order_ref:
         po_data["order_confirmation_no"] = order_ref
 
-    # Add tax charges (shipping + VAT) — same as PI so amounts match
-    taxes = _build_taxes(extracted_data, settings)
-    if taxes:
-        po_data["taxes"] = taxes
+    # VAT: select the template/tax_category via the Tax Rule; ERPNext computes
+    # the per-item rate from the Item Tax Templates on insert.
+    _apply_tax_template(po_data, supplier, settings.get("default_company"), doc_date)
 
     # Apply document-level discount (Rabatt/Skonto extracted from line items)
     if extracted_data.get("discount_amount"):
@@ -110,6 +109,8 @@ def create_purchase_order(
 
     po = frappe.get_doc(po_data)
     po.insert(ignore_permissions=True)
+    # Add shipping/surcharge charges after insert (see _finalize_charges).
+    _finalize_charges(po, extracted_data, settings)
     po.add_comment(
         "Comment",
         f"Retrospectively created from {extracted_data.get('document_type', 'unknown')} "
@@ -182,239 +183,106 @@ def _build_items(
     return items
 
 
-def _build_shipping_charges(extracted_data: dict, settings: dict) -> list[dict]:
-    """Build shipping-only charges for PO/PR (no VAT)."""
-    shipping = extracted_data.get("shipping_cost")
-    if not shipping:
-        return []
+def _apply_tax_template(
+    doc_data: dict, supplier: str, company: str, posting_date: str
+) -> None:
+    """Set ``tax_category`` + the Tax-Rule-resolved Purchase Taxes and Charges
+    Template on the document data.
+
+    VAT is **not** built by us anymore.  Each Item carries a (generic) Item Tax
+    Template at the Item-master level; ERPNext resolves it per line during
+    validation (``item_tax_rate``) and ``set_taxes_and_charges`` adds one tax
+    row per VAT account (``set_by_item_tax_template``).  ``calculate_taxes_and_
+    totals`` then computes the real per-item tax — the summary tax row therefore
+    legitimately shows ``rate = 0`` while ``tax_amount`` is correct.
+
+    All we do here is drive the selection: set ``tax_category`` (from the
+    supplier) so the Tax Rule + any tax-category-specific Item Tax Templates
+    resolve, and record the template the Tax Rule picks on ``taxes_and_charges``.
+    """
+    tax_category = frappe.db.get_value("Supplier", supplier, "tax_category")
+    if tax_category:
+        doc_data["tax_category"] = tax_category
+
     try:
-        shipping_amount = float(shipping)
-    except (TypeError, ValueError):
-        return []
-    if shipping_amount <= 0:
-        return []
+        from erpnext.accounts.party import set_taxes
 
-    company = settings.get("default_company")
-    shipping_account = _get_shipping_account(company)
-    if not shipping_account:
-        return []
+        supplier_group = frappe.db.get_value("Supplier", supplier, "supplier_group")
+        template = set_taxes(
+            supplier,
+            "Supplier",
+            posting_date,
+            company,
+            supplier_group=supplier_group,
+            tax_category=tax_category,
+        )
+    except Exception:
+        # No Tax Rule / erpnext unavailable — VAT still comes from the per-item
+        # Item Tax Templates, so this is non-fatal.
+        logger.warning(
+            "Could not resolve tax template via Tax Rule for supplier %r",
+            supplier,
+            exc_info=True,
+        )
+        template = None
 
-    return [
-        {
-            "charge_type": "Actual",
-            "account_head": shipping_account,
-            "tax_amount": shipping_amount,
-            "description": "Shipping / Versandkosten",
-            "add_deduct_tax": "Add",
-            # Bezugsnebenkosten: include in stock valuation (landed cost).
-            "category": "Valuation and Total",
-        }
-    ]
-
-
-def _build_taxes(extracted_data: dict, settings: dict) -> list[dict]:
-    """Build Purchase Taxes and Charges (shipping + surcharges + VAT)."""
-    company = settings.get("default_company")
-    taxes = []
-    has_actual_rows = False
-
-    # Shipping (Actual amount)
-    shipping = extracted_data.get("shipping_cost")
-    if shipping:
-        try:
-            shipping_amount = float(shipping)
-        except (TypeError, ValueError):
-            shipping_amount = 0
-        if shipping_amount > 0:
-            shipping_account = _get_shipping_account(company)
-            if shipping_account:
-                taxes.append(
-                    {
-                        "charge_type": "Actual",
-                        "account_head": shipping_account,
-                        "tax_amount": shipping_amount,
-                        "description": "Shipping / Versandkosten",
-                        "add_deduct_tax": "Add",
-                        # Bezugsnebenkosten: include in stock valuation (landed
-                        # cost) as well as the document total.
-                        "category": "Valuation and Total",
-                    }
-                )
-                has_actual_rows = True
-
-    # Surcharge / Mindermengenaufschlag (Actual amount, increases item cost)
-    surcharge = extracted_data.get("surcharge_amount")
-    if surcharge:
-        try:
-            surcharge_amount = float(surcharge)
-        except (TypeError, ValueError):
-            surcharge_amount = 0
-        if surcharge_amount > 0:
-            surcharge_account = _get_shipping_account(company)
-            if surcharge_account:
-                taxes.append(
-                    {
-                        "charge_type": "Actual",
-                        "account_head": surcharge_account,
-                        "tax_amount": surcharge_amount,
-                        "description": "Mindermengenaufschlag",
-                        "add_deduct_tax": "Add",
-                        # Surcharge raises item cost → include in stock valuation.
-                        "category": "Valuation and Total",
-                    }
-                )
-                has_actual_rows = True
-
-    # Collect tax rates from items
-    tax_rates = set()
-    for item in extracted_data.get("items", []):
-        rate = item.get("tax_rate")
-        if rate is not None:
-            try:
-                tax_rates.add(float(rate))
-            except (TypeError, ValueError):
-                pass
-
-    # VAT rows — "On Previous Row Total" if shipping exists, else "On Net Total"
-    if tax_rates:
-        for rate in sorted(tax_rates):
-            if rate <= 0:
-                continue
-            tax_account = _get_tax_account(company, rate)
-            if not tax_account:
-                logger.warning(
-                    "No tax account found for rate %.1f%% in company %r — skipping row",
-                    rate,
-                    company,
-                )
-                continue
-            tax_row = {
-                "account_head": tax_account,
-                "rate": rate,
-                "description": f"VAT {rate:.1f}%",
-            }
-            if has_actual_rows:
-                tax_row["charge_type"] = "On Previous Row Total"
-                tax_row["row_id"] = len(taxes)  # references last Actual row
-            else:
-                tax_row["charge_type"] = "On Net Total"
-            taxes.append(tax_row)
-
-    return taxes
+    if template:
+        doc_data["taxes_and_charges"] = template
 
 
-def _pick_input_tax_account(
-    rows: list[dict], tax_rate: float, rate_tolerance: float
-) -> str | None:
-    """Pick the best tax account from template rows for a purchase document.
+def _build_charge_rows(extracted_data: dict, settings: dict) -> list[dict]:
+    """Build the document-level *charge* rows we add ourselves: shipping
+    (Versandkosten) and surcharge (Mindermengenaufschlag).
 
-    Collects all rows whose ``rate`` matches *tax_rate* (within *rate_tolerance*),
-    then **prefers** accounts with ``root_type='Asset'`` (Vorsteuer / input VAT)
-    over ``root_type='Liability'`` (Umsatzsteuer / output VAT).
-
-    In German accounting (SKR03/SKR04) input-tax accounts live under Assets
-    (e.g. 1576/1406 Vorsteuer) while output-tax accounts live under Liabilities
-    (e.g. 1771/3806 Umsatzsteuer).  For purchase documents we must book to
-    Vorsteuer — booking to Umsatzsteuer is a compliance error.
+    These are **Bezugsnebenkosten** — ``Actual`` rows categorised as
+    ``Valuation and Total`` so they feed stock valuation (landed cost), not just
+    the document total.  VAT rows are added by ERPNext from the Item Tax
+    Templates, so they are intentionally absent here.
     """
-    candidates: list[str] = []
-    for row in rows:
+    company = settings.get("default_company")
+    charges: list[dict] = []
+
+    for amount_key, description in (
+        ("shipping_cost", "Shipping / Versandkosten"),
+        ("surcharge_amount", "Mindermengenaufschlag"),
+    ):
         try:
-            if abs(float(row["rate"]) - tax_rate) < rate_tolerance:
-                candidates.append(row["account_head"])
+            amount = float(extracted_data.get(amount_key) or 0)
         except (TypeError, ValueError):
+            amount = 0.0
+        if amount <= 0:
             continue
+        account = _get_shipping_account(company)
+        if not account:
+            continue
+        charges.append(
+            {
+                "charge_type": "Actual",
+                "account_head": account,
+                "tax_amount": amount,
+                "description": description,
+                "add_deduct_tax": "Add",
+                "category": "Valuation and Total",
+            }
+        )
 
-    if not candidates:
-        return None
-
-    # Prefer Asset (Vorsteuer / input VAT) accounts
-    for account in candidates:
-        root_type = frappe.db.get_value("Account", account, "root_type")
-        if root_type == "Asset":
-            return account
-
-    # Graceful fallback — still return *something* but warn loudly
-    logger.warning(
-        "Tax account %r for rate %.1f%% does not have root_type='Asset' — "
-        "expected a Vorsteuer (input VAT) account for purchase documents. "
-        "Please check your Purchase Taxes and Charges Template.",
-        candidates[0],
-        tax_rate,
-    )
-    return candidates[0]
+    return charges
 
 
-def _get_tax_account(company: str, tax_rate: float) -> str | None:
-    """Find the correct tax account for the given *tax_rate* and *company*.
+def _finalize_charges(doc, extracted_data: dict, settings: dict) -> None:
+    """Append our shipping/surcharge charge rows to an *already inserted* doc.
 
-    German accounting law requires each VAT rate to be booked on its own
-    dedicated account (e.g. 1576 for 19 % Vorsteuer, 1571 for 7 %).  Booking
-    to the wrong account means the tax is legally owed even when it shouldn't
-    be, so this function must return the rate-specific account — never a random
-    tax account.
-
-    Lookup strategy:
-
-    1. **Default Purchase Taxes and Charges Template** — look for a row whose
-       ``rate`` matches *tax_rate*.  Prefer accounts with ``root_type='Asset'``
-       (Vorsteuer) over ``root_type='Liability'`` (Umsatzsteuer).
-    2. **Any Purchase Taxes and Charges Template for the company** — same
-       rate-matching + root_type preference logic.
-    3. **No fallback** — if no rate-matched account is found we return
-       ``None`` so the caller can skip the row (and log a warning) rather
-       than silently booking to a wrong account.
+    This must run **after** ``insert()``: ERPNext only auto-populates the
+    per-item VAT rows when the taxes table is still empty (``set_taxes_and_
+    charges`` early-returns otherwise).  So we let it add the VAT rows on insert,
+    then append the Bezugsnebenkosten and re-save to recompute the totals.
     """
-    if not company:
-        return None
-
-    rate_tolerance = 0.01  # floating-point comparison tolerance
-
-    # ------------------------------------------------------------------
-    # 1. Default template — match by rate, prefer Vorsteuer (Asset)
-    # ------------------------------------------------------------------
-    default_template = frappe.db.get_value(
-        "Purchase Taxes and Charges Template",
-        {"company": company, "is_default": 1},
-        "name",
-    )
-    if default_template:
-        rows = frappe.get_all(
-            "Purchase Taxes and Charges",
-            filters={"parent": default_template},
-            fields=["account_head", "rate"],
-        )
-        result = _pick_input_tax_account(rows, tax_rate, rate_tolerance)
-        if result:
-            return result
-
-    # ------------------------------------------------------------------
-    # 2. Any template for this company — match by rate, prefer Vorsteuer
-    # ------------------------------------------------------------------
-    all_templates = frappe.get_all(
-        "Purchase Taxes and Charges Template",
-        filters={"company": company},
-        fields=["name"],
-    )
-    for tmpl in all_templates:
-        if tmpl["name"] == default_template:
-            continue  # already checked above
-        rows = frappe.get_all(
-            "Purchase Taxes and Charges",
-            filters={"parent": tmpl["name"]},
-            fields=["account_head", "rate"],
-        )
-        result = _pick_input_tax_account(rows, tax_rate, rate_tolerance)
-        if result:
-            return result
-
-    logger.warning(
-        "No tax account found for rate %.1f%% in company %r — "
-        "check your Purchase Taxes and Charges Templates",
-        tax_rate,
-        company,
-    )
-    return None
+    charges = _build_charge_rows(extracted_data, settings)
+    if not charges:
+        return
+    for row in charges:
+        doc.append("taxes", row)
+    doc.save(ignore_permissions=True)
 
 
 def _get_shipping_account(company: str) -> str | None:
