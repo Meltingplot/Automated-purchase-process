@@ -17,9 +17,8 @@ sys.modules.setdefault("frappe.utils", frappe_mock.utils)
 
 import procurement_ai.chain_builder.purchase_order as po_mod
 from procurement_ai.chain_builder.purchase_order import (
+    _build_charge_rows,
     _build_items,
-    _build_shipping_charges,
-    _build_taxes,
     create_purchase_order,
 )
 from procurement_ai.chain_builder.purchase_receipt import create_purchase_receipt
@@ -130,33 +129,79 @@ class TestCreatePurchaseOrder:
         call_args = frappe_mock.get_doc.call_args[0][0]
         assert call_args["schedule_date"] >= call_args["transaction_date"]
 
+    def test_po_does_not_prebuild_vat_rows(self):
+        """VAT is delegated to ERPNext — we must not pre-populate the taxes
+        table (that would block ERPNext's per-item Item Tax Template rows)."""
+        _setup_mock_doc()
+        create_purchase_order(EXTRACTED_DATA, "ACME GmbH", SETTINGS, "JOB-001")
+        call_args = frappe_mock.get_doc.call_args[0][0]
+        assert "taxes" not in call_args
+
+    def test_po_sets_tax_category_from_supplier(self):
+        """tax_category drives the Tax Rule, so it is copied from the supplier."""
+        mock_doc = _setup_mock_doc()
+        frappe_mock.db.get_value.side_effect = lambda dt, name, field, **kw: (
+            "Inland" if field == "tax_category" else None
+        )
+        create_purchase_order(EXTRACTED_DATA, "ACME GmbH", SETTINGS, "JOB-001")
+        call_args = frappe_mock.get_doc.call_args[0][0]
+        assert call_args["tax_category"] == "Inland"
+
+    def test_po_appends_shipping_after_insert(self):
+        """Shipping charge is appended to the doc *after* insert and re-saved,
+        not passed in the creation dict."""
+        mock_doc = _setup_mock_doc()
+        frappe_mock.get_all.return_value = [{"name": "4730 - Bezugsnk"}]
+        data = {**EXTRACTED_DATA, "shipping_cost": 9.90}
+        create_purchase_order(data, "ACME GmbH", SETTINGS, "JOB-001")
+        # appended as a taxes row and persisted via save()
+        append_calls = [c for c in mock_doc.append.call_args_list if c[0][0] == "taxes"]
+        assert len(append_calls) == 1
+        assert append_calls[0][0][1]["description"] == "Shipping / Versandkosten"
+        mock_doc.save.assert_called_with(ignore_permissions=True)
+
 
 # ============================================================
-# _build_shipping_charges
+# _build_charge_rows (shipping + surcharge Bezugsnebenkosten)
 # ============================================================
 
 
-class TestBuildShippingCharges:
+class TestBuildChargeRows:
     def setup_method(self):
         _reset()
 
-    def test_no_shipping(self):
-        result = _build_shipping_charges({"shipping_cost": 0}, SETTINGS)
+    def test_no_charges(self):
+        result = _build_charge_rows({"shipping_cost": 0}, SETTINGS)
         assert result == []
 
     def test_with_shipping(self):
         frappe_mock.get_all.return_value = [{"name": "4730 - Bezugsnk"}]
-        result = _build_shipping_charges({"shipping_cost": 5.99}, SETTINGS)
+        result = _build_charge_rows({"shipping_cost": 5.99}, SETTINGS)
         assert len(result) == 1
         assert result[0]["charge_type"] == "Actual"
         assert result[0]["tax_amount"] == 5.99
         # Bezugsnebenkosten must hit stock valuation (landed cost), not just total
         assert result[0]["category"] == "Valuation and Total"
 
+    def test_shipping_and_surcharge(self):
+        """Shipping + surcharge both produce Actual valuation rows."""
+        frappe_mock.get_all.return_value = [{"name": "4730 - Bezugsnk"}]
+        result = _build_charge_rows(
+            {"shipping_cost": 5.99, "surcharge_amount": 3.0}, SETTINGS
+        )
+        assert len(result) == 2
+        assert {r["description"] for r in result} == {
+            "Shipping / Versandkosten",
+            "Mindermengenaufschlag",
+        }
+        for row in result:
+            assert row["charge_type"] == "Actual"
+            assert row["category"] == "Valuation and Total"
+
     def test_no_shipping_account_returns_empty(self):
         frappe_mock.get_all.return_value = []
         frappe_mock.db.get_value.return_value = None
-        result = _build_shipping_charges({"shipping_cost": 5.99}, SETTINGS)
+        result = _build_charge_rows({"shipping_cost": 5.99}, SETTINGS)
         assert result == []
 
 

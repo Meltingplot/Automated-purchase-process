@@ -63,16 +63,17 @@ def create_purchase_receipt(
     }
 
     # Set transaction currency + conversion rate (book foreign docs in base currency)
-    from .purchase_order import _apply_document_currency
+    from .purchase_order import (
+        _apply_document_currency,
+        _apply_tax_template,
+        _finalize_charges,
+    )
 
     _apply_document_currency(pr_data, extracted_data, settings, doc_date)
 
-    # Add tax charges (shipping + VAT) — same as PI so amounts match
-    from .purchase_order import _build_taxes
-
-    taxes = _build_taxes(extracted_data, settings)
-    if taxes:
-        pr_data["taxes"] = taxes
+    # VAT: select template/tax_category via Tax Rule; ERPNext computes the
+    # per-item rate from the Item Tax Templates on insert.
+    _apply_tax_template(pr_data, supplier, settings.get("default_company"), posting_date)
 
     # Apply document-level discount (Rabatt/Skonto extracted from line items)
     if extracted_data.get("discount_amount"):
@@ -82,6 +83,8 @@ def create_purchase_receipt(
     pr = frappe.get_doc(pr_data)
 
     pr.insert(ignore_permissions=True)
+    # Add shipping/surcharge charges after insert (see _finalize_charges).
+    _finalize_charges(pr, extracted_data, settings)
     pr.add_comment(
         "Comment",
         f"Retrospectively created from {extracted_data.get('document_type', 'unknown')} "

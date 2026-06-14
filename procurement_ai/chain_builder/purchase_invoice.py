@@ -62,8 +62,6 @@ def create_purchase_invoice(
     if due < doc_date:
         due = doc_date
 
-    from .purchase_order import _build_taxes
-
     pi_data = {
         "doctype": "Purchase Invoice",
         "supplier": supplier,
@@ -80,13 +78,17 @@ def create_purchase_invoice(
     }
 
     # Set transaction currency + conversion rate (book foreign docs in base currency)
-    from .purchase_order import _apply_document_currency
+    from .purchase_order import (
+        _apply_document_currency,
+        _apply_tax_template,
+        _finalize_charges,
+    )
 
     _apply_document_currency(pi_data, extracted_data, settings, doc_date)
 
-    taxes = _build_taxes(extracted_data, settings)
-    if taxes:
-        pi_data["taxes"] = taxes
+    # VAT: select template/tax_category via Tax Rule; ERPNext computes the
+    # per-item rate from the Item Tax Templates on insert.
+    _apply_tax_template(pi_data, supplier, settings.get("default_company"), doc_date)
 
     # Apply document-level discount (Rabatt/Skonto extracted from line items)
     if extracted_data.get("discount_amount"):
@@ -103,6 +105,8 @@ def create_purchase_invoice(
         )
 
     pi.insert(ignore_permissions=True)
+    # Add shipping/surcharge charges after insert (see _finalize_charges).
+    _finalize_charges(pi, extracted_data, settings)
     pi.add_comment(
         "Comment",
         f"Retrospectively created from {extracted_data.get('document_type', 'unknown')} "

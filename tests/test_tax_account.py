@@ -1,15 +1,15 @@
-"""Tests for _get_tax_account / _pick_input_tax_account — rate-aware tax account lookup."""
+"""Tests for the tax model: Tax-Rule-driven template selection + Bezugsnebenkosten charge rows.
+
+VAT itself is delegated to ERPNext (per-item Item Tax Templates), so procurement_ai
+only sets tax_category/taxes_and_charges and appends shipping/surcharge charges.
+"""
 
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 # Provide a fake frappe module so the import works without a Frappe instance.
-# Use setdefault and capture the actual module-level object (may already exist
-# from another test file that was imported first).
 _new_mock = MagicMock()
 _new_mock.utils.flt = lambda x, *a, **kw: float(x or 0)
 _new_mock.utils.today = lambda: "2026-03-24"
@@ -18,282 +18,94 @@ frappe_mock = sys.modules.setdefault("frappe", _new_mock)
 sys.modules.setdefault("frappe.utils", frappe_mock.utils)
 
 from procurement_ai.chain_builder.purchase_order import (
-    _get_tax_account,
-    _build_taxes,
-    _pick_input_tax_account,
+    _apply_tax_template,
+    _build_charge_rows,
 )
 
 
-def _make_db_get_value(template_name, root_type_map=None):
-    """Build a side_effect for frappe.db.get_value that handles both
-    template lookups and Account root_type lookups.
-
-    *template_name* is returned for the Purchase Taxes and Charges Template query.
-    *root_type_map* maps account names to root_type values (default: all Asset).
-    """
-    if root_type_map is None:
-        root_type_map = {}
-
-    def _side_effect(doctype, filters_or_name, field=None, **kw):
-        if doctype == "Purchase Taxes and Charges Template":
-            return template_name
-        if doctype == "Account":
-            # filters_or_name is the account name, field is "root_type"
-            return root_type_map.get(filters_or_name, "Asset")
-        return None
-
-    return _side_effect
+def _reset_frappe():
+    frappe_mock.reset_mock()
+    frappe_mock.db.get_value.side_effect = None
+    frappe_mock.db.get_value.return_value = None
+    frappe_mock.get_all.side_effect = None
+    frappe_mock.get_all.return_value = []
 
 
-class TestPickInputTaxAccount:
-    """Test suite for the Vorsteuer/Umsatzsteuer preference helper."""
+class TestApplyTaxTemplate:
+    """tax_category + Tax-Rule-resolved template are written onto the doc data."""
 
     def setup_method(self):
-        frappe_mock.reset_mock()
+        _reset_frappe()
 
-    def test_prefers_vorsteuer_over_umsatzsteuer(self):
-        """When both Vorsteuer (Asset) and Umsatzsteuer (Liability) match the
-        same rate, Vorsteuer must be selected for purchase documents."""
-        rows = [
-            {"account_head": "3806 - Umsatzsteuer 19%", "rate": 19.0},
-            {"account_head": "1406 - Vorsteuer 19%", "rate": 19.0},
-        ]
-        frappe_mock.db.get_value.side_effect = lambda dt, name, field, **kw: {
-            "3806 - Umsatzsteuer 19%": "Liability",
-            "1406 - Vorsteuer 19%": "Asset",
-        }.get(name)
-
-        result = _pick_input_tax_account(rows, 19.0, 0.01)
-        assert result == "1406 - Vorsteuer 19%"
-
-    def test_falls_back_to_umsatzsteuer_when_no_vorsteuer(self):
-        """When only Umsatzsteuer exists for the rate, still return it (with warning)."""
-        rows = [
-            {"account_head": "3806 - Umsatzsteuer 19%", "rate": 19.0},
-        ]
-        frappe_mock.db.get_value.side_effect = lambda dt, name, field, **kw: "Liability"
-
-        result = _pick_input_tax_account(rows, 19.0, 0.01)
-        assert result == "3806 - Umsatzsteuer 19%"
-
-    def test_returns_none_when_no_rate_match(self):
-        rows = [
-            {"account_head": "1406 - Vorsteuer 19%", "rate": 19.0},
-        ]
-        result = _pick_input_tax_account(rows, 7.0, 0.01)
-        assert result is None
-
-    def test_skips_non_matching_rates(self):
-        """Only accounts matching the requested rate should be considered."""
-        rows = [
-            {"account_head": "3806 - Umsatzsteuer 19%", "rate": 19.0},
-            {"account_head": "1571 - Vorsteuer 7%", "rate": 7.0},
-        ]
-        frappe_mock.db.get_value.side_effect = lambda dt, name, field, **kw: {
-            "3806 - Umsatzsteuer 19%": "Liability",
-            "1571 - Vorsteuer 7%": "Asset",
-        }.get(name, "Asset")
-
-        # Requesting 19% — only "3806 - Umsatzsteuer 19%" matches
-        result = _pick_input_tax_account(rows, 19.0, 0.01)
-        assert result == "3806 - Umsatzsteuer 19%"
-
-
-class TestGetTaxAccount:
-    """Test suite for rate-aware _get_tax_account."""
-
-    def setup_method(self):
-        frappe_mock.reset_mock()
-
-    def test_returns_none_for_empty_company(self):
-        assert _get_tax_account("", 19.0) is None
-        assert _get_tax_account(None, 19.0) is None
-
-    def test_matches_rate_from_default_template(self):
-        """Should return the account whose rate matches in the default template."""
-        frappe_mock.db.get_value.side_effect = _make_db_get_value("Default VAT Template")
-        frappe_mock.get_all.side_effect = [
-            # Default template rows
-            [
-                {"account_head": "1571 - Vorsteuer 7%", "rate": 7.0},
-                {"account_head": "1576 - Vorsteuer 19%", "rate": 19.0},
-            ],
-        ]
-
-        result = _get_tax_account("Test Company", 19.0)
-        assert result == "1576 - Vorsteuer 19%"
-
-    def test_matches_7_percent_rate(self):
-        """Should return the 7% account when 7% rate is requested."""
-        frappe_mock.db.get_value.side_effect = _make_db_get_value("Default VAT Template")
-        frappe_mock.get_all.side_effect = [
-            # Default template rows
-            [
-                {"account_head": "1571 - Vorsteuer 7%", "rate": 7.0},
-                {"account_head": "1576 - Vorsteuer 19%", "rate": 19.0},
-            ],
-        ]
-
-        result = _get_tax_account("Test Company", 7.0)
-        assert result == "1571 - Vorsteuer 7%"
-
-    def test_returns_none_when_rate_not_in_any_template(self):
-        """Must return None (not a random account) if no template has the rate."""
-        frappe_mock.db.get_value.side_effect = _make_db_get_value("Default VAT Template")
-        # Default template only has 19%
-        frappe_mock.get_all.side_effect = [
-            [{"account_head": "1576 - Vorsteuer 19%", "rate": 19.0}],
-            # No other templates
-            [],
-        ]
-
-        result = _get_tax_account("Test Company", 7.0)
-        assert result is None
-
-    def test_falls_back_to_other_templates(self):
-        """When default template doesn't have the rate, check other templates."""
-        frappe_mock.db.get_value.side_effect = _make_db_get_value("Default VAT Template")
-        frappe_mock.get_all.side_effect = [
-            # Default template rows — only 19%
-            [{"account_head": "1576 - Vorsteuer 19%", "rate": 19.0}],
-            # All templates for this company
-            [{"name": "Default VAT Template"}, {"name": "Reduced VAT Template"}],
-            # Reduced VAT Template rows
-            [{"account_head": "1571 - Vorsteuer 7%", "rate": 7.0}],
-        ]
-
-        result = _get_tax_account("Test Company", 7.0)
-        assert result == "1571 - Vorsteuer 7%"
-
-    def test_no_default_template_falls_back_to_other(self):
-        """When no default template exists, check any template for the company."""
-        frappe_mock.db.get_value.side_effect = _make_db_get_value(None)
-        frappe_mock.get_all.side_effect = [
-            # All templates for this company
-            [{"name": "Some VAT Template"}],
-            # Template rows
-            [
-                {"account_head": "1571 - Vorsteuer 7%", "rate": 7.0},
-                {"account_head": "1576 - Vorsteuer 19%", "rate": 19.0},
-            ],
-        ]
-
-        result = _get_tax_account("Test Company", 19.0)
-        assert result == "1576 - Vorsteuer 19%"
-
-    def test_prefers_vorsteuer_in_mixed_template(self):
-        """Template with both Umsatzsteuer and Vorsteuer at 19% → pick Vorsteuer."""
-        frappe_mock.db.get_value.side_effect = _make_db_get_value(
-            "Default VAT Template",
-            root_type_map={
-                "3806 - Umsatzsteuer 19%": "Liability",
-                "1406 - Vorsteuer 19%": "Asset",
-            },
+    def test_sets_tax_category_from_supplier(self):
+        frappe_mock.db.get_value.side_effect = lambda dt, name, field, **kw: (
+            "Inland" if field == "tax_category" else None
         )
-        frappe_mock.get_all.side_effect = [
-            [
-                {"account_head": "3806 - Umsatzsteuer 19%", "rate": 19.0},
-                {"account_head": "1406 - Vorsteuer 19%", "rate": 19.0},
-            ],
-        ]
+        doc_data = {}
+        _apply_tax_template(doc_data, "ACME GmbH", "Test GmbH", "2026-03-24")
+        assert doc_data["tax_category"] == "Inland"
 
-        result = _get_tax_account("Test Company", 19.0)
-        assert result == "1406 - Vorsteuer 19%"
+    def test_no_tax_category_leaves_field_unset(self):
+        frappe_mock.db.get_value.return_value = None
+        doc_data = {}
+        _apply_tax_template(doc_data, "ACME GmbH", "Test GmbH", "2026-03-24")
+        assert "tax_category" not in doc_data
 
-    def test_returns_umsatzsteuer_when_only_option(self):
-        """When only Umsatzsteuer exists for the rate, still return it."""
-        frappe_mock.db.get_value.side_effect = _make_db_get_value(
-            "Default VAT Template",
-            root_type_map={"3806 - Umsatzsteuer 19%": "Liability"},
-        )
-        frappe_mock.get_all.side_effect = [
-            [{"account_head": "3806 - Umsatzsteuer 19%", "rate": 19.0}],
-        ]
+    def test_sets_resolved_template(self):
+        """When the Tax Rule resolves a template, it is recorded on taxes_and_charges."""
+        import types
 
-        result = _get_tax_account("Test Company", 19.0)
-        assert result == "3806 - Umsatzsteuer 19%"
+        frappe_mock.db.get_value.return_value = None
+        doc_data = {}
+        # Inject a stub erpnext.accounts.party so the lazy import inside
+        # _apply_tax_template succeeds and returns a template name.
+        erpnext = types.ModuleType("erpnext")
+        accounts = types.ModuleType("erpnext.accounts")
+        party = types.ModuleType("erpnext.accounts.party")
+        party.set_taxes = lambda *a, **kw: "Inland VAT 19%"
+        accounts.party = party
+        erpnext.accounts = accounts
+        sys.modules["erpnext"] = erpnext
+        sys.modules["erpnext.accounts"] = accounts
+        sys.modules["erpnext.accounts.party"] = party
+        try:
+            _apply_tax_template(doc_data, "ACME GmbH", "Test GmbH", "2026-03-24")
+        finally:
+            for m in ("erpnext.accounts.party", "erpnext.accounts", "erpnext"):
+                sys.modules.pop(m, None)
+        assert doc_data["taxes_and_charges"] == "Inland VAT 19%"
+
+    def test_tax_rule_failure_is_non_fatal(self):
+        """No erpnext / no Tax Rule → no taxes_and_charges, but no error either."""
+        frappe_mock.db.get_value.return_value = None
+        sys.modules.pop("erpnext.accounts.party", None)
+        doc_data = {}
+        _apply_tax_template(doc_data, "ACME GmbH", "Test GmbH", "2026-03-24")
+        assert "taxes_and_charges" not in doc_data
 
 
-class TestBuildTaxesRateAwareness:
-    """Verify _build_taxes creates separate rows with correct accounts per rate."""
+class TestBuildChargeRowsModel:
+    """Shipping + surcharge are Actual Bezugsnebenkosten rows; no VAT rows."""
 
     def setup_method(self):
-        frappe_mock.reset_mock()
+        _reset_frappe()
 
-    def test_different_accounts_for_different_rates(self):
-        """Items with 7% and 19% should produce two tax rows with distinct accounts."""
-        extracted_data = {
-            "items": [
-                {"tax_rate": 19.0, "item_name": "Widget"},
-                {"tax_rate": 7.0, "item_name": "Book"},
-            ],
-        }
-        settings = {"default_company": "Test GmbH"}
+    def test_no_vat_rows_built(self):
+        """We never emit rows with a 'rate' — VAT is ERPNext's job now."""
+        frappe_mock.get_all.return_value = [{"name": "4730 - Bezugsnk"}]
+        rows = _build_charge_rows(
+            {"items": [{"tax_rate": 19.0}], "shipping_cost": 10.0}, {"default_company": "Test GmbH"}
+        )
+        assert all("rate" not in r for r in rows)
+        assert all(r["charge_type"] == "Actual" for r in rows)
 
-        # Mock _get_tax_account to return rate-specific accounts
-        with patch(
-            "procurement_ai.chain_builder.purchase_order._get_tax_account"
-        ) as mock_tax:
-            mock_tax.side_effect = lambda company, rate: {
-                7.0: "1571 - Vorsteuer 7%",
-                19.0: "1576 - Vorsteuer 19%",
-            }.get(rate)
-
-            taxes = _build_taxes(extracted_data, settings)
-
-        vat_rows = [t for t in taxes if "VAT" in t.get("description", "")]
-        assert len(vat_rows) == 2
-        assert vat_rows[0]["account_head"] == "1571 - Vorsteuer 7%"
-        assert vat_rows[0]["rate"] == 7.0
-        assert vat_rows[1]["account_head"] == "1576 - Vorsteuer 19%"
-        assert vat_rows[1]["rate"] == 19.0
-
-    def test_skips_rate_with_no_matching_account(self):
-        """If no account is found for a rate, that tax row should be skipped."""
-        extracted_data = {
-            "items": [
-                {"tax_rate": 19.0, "item_name": "Widget"},
-                {"tax_rate": 5.0, "item_name": "Unknown rate item"},
-            ],
-        }
-        settings = {"default_company": "Test GmbH"}
-
-        with patch(
-            "procurement_ai.chain_builder.purchase_order._get_tax_account"
-        ) as mock_tax:
-            # Only 19% has an account, 5% does not
-            mock_tax.side_effect = lambda company, rate: (
-                "1576 - Vorsteuer 19%" if abs(rate - 19.0) < 0.01 else None
-            )
-
-            taxes = _build_taxes(extracted_data, settings)
-
-        vat_rows = [t for t in taxes if "VAT" in t.get("description", "")]
-        assert len(vat_rows) == 1
-        assert vat_rows[0]["rate"] == 19.0
-
-    def test_shipping_and_surcharge_are_valuation_and_total(self):
-        """Bezugsnebenkosten (shipping + surcharge) must feed stock valuation."""
-        extracted_data = {
-            "items": [{"tax_rate": 19.0, "item_name": "Widget"}],
-            "shipping_cost": 10.0,
-            "surcharge_amount": 5.0,
-        }
-        settings = {"default_company": "Test GmbH"}
-
-        with patch(
-            "procurement_ai.chain_builder.purchase_order._get_shipping_account"
-        ) as mock_ship, patch(
-            "procurement_ai.chain_builder.purchase_order._get_tax_account"
-        ) as mock_tax:
-            mock_ship.return_value = "4730 - Bezugsnebenkosten"
-            mock_tax.return_value = "1576 - Vorsteuer 19%"
-
-            taxes = _build_taxes(extracted_data, settings)
-
-        actual_rows = [t for t in taxes if t.get("charge_type") == "Actual"]
-        assert len(actual_rows) == 2  # shipping + surcharge
-        for row in actual_rows:
+    def test_shipping_and_surcharge_valuation(self):
+        frappe_mock.get_all.return_value = [{"name": "4730 - Bezugsnk"}]
+        rows = _build_charge_rows(
+            {"shipping_cost": 10.0, "surcharge_amount": 5.0}, {"default_company": "Test GmbH"}
+        )
+        assert len(rows) == 2
+        for row in rows:
             assert row["category"] == "Valuation and Total"
 
 
